@@ -1,79 +1,123 @@
-import { BlockType, Entity, PlayerState, Point3D } from '../types';
+import { BlockType, Difficulty, Entity, Particle, PlayerState, Point3D } from '../types';
 import { 
   GRAVITY, 
   JUMP_FORCE, 
-  RUN_SPEED_BASE, 
-  RUN_SPEED_MAX, 
-  SPEED_INCREMENT,
-  LEVEL_DISTANCE,
-  ACCELERATION, 
-  LANE_WIDTH 
+  DIFFICULTY_SETTINGS,
+  LANE_WIDTH,
+  MOVE_ACCEL_X,
+  FRICTION_X,
+  MAX_SPEED_X,
+  CAMERA_TILT_FACTOR,
+  BASE_LEVEL_TARGET,
+  LEVEL_TARGET_INCREMENT
 } from '../constants';
 
 export class GameEngine {
   public entities: Entity[] = [];
+  public particles: Particle[] = [];
   public player: PlayerState = {
     position: { x: 0, y: 0, z: 0 },
     velocity: { x: 0, y: 0, z: 0 },
-    isJumping: false
+    isJumping: false,
+    tilt: 0
   };
   
   private lastGenZ = 10;
-  private currentSpeed = RUN_SPEED_BASE;
+  private currentSpeed = 0;
   private score = 0;
   private lives = 3;
   private level = 1;
+  private difficulty: Difficulty = Difficulty.MEDIUM;
+  private particleIdCounter = 0;
+  private goldCollectedInLevel = 0;
+  private levelTarget = BASE_LEVEL_TARGET;
 
   constructor() {
-    this.reset();
+    this.reset(Difficulty.MEDIUM);
   }
 
-  reset() {
+  reset(difficulty: Difficulty) {
+    this.difficulty = difficulty;
+    const settings = DIFFICULTY_SETTINGS[difficulty];
+
     this.player = {
       position: { x: 0, y: 0, z: 0 },
       velocity: { x: 0, y: 0, z: 0 },
-      isJumping: false
+      isJumping: false,
+      tilt: 0
     };
     this.entities = [];
-    this.currentSpeed = RUN_SPEED_BASE;
+    this.particles = [];
+    this.currentSpeed = settings.startSpeed;
     this.lastGenZ = 5;
     this.score = 0;
     this.lives = 3;
     this.level = 1;
+    this.goldCollectedInLevel = 0;
+    this.levelTarget = BASE_LEVEL_TARGET;
     
     // Initial ground generation
-    for (let z = 0; z < 20; z++) {
+    for (let z = 0; z < 25; z++) {
       this.generateSlice(z);
     }
   }
 
   update(input: { left: boolean; right: boolean; jump: boolean }, deltaTime: number) {
-    // 1. Calculate Level & Speed
-    // Level up every LEVEL_DISTANCE units
-    this.level = Math.floor(Math.max(0, this.player.position.z) / LEVEL_DISTANCE) + 1;
+    const settings = DIFFICULTY_SETTINGS[this.difficulty];
+
+    // 1. Leveling Logic (Gold Based)
+    if (this.goldCollectedInLevel >= this.levelTarget) {
+        this.level++;
+        this.goldCollectedInLevel = 0;
+        this.levelTarget += LEVEL_TARGET_INCREMENT;
+        // Boost speed slightly on level up
+        this.currentSpeed = Math.min(this.currentSpeed + 0.05, settings.maxSpeed + 0.2); // Allow exceeding base max slightly
+    }
     
+    // Smooth acceleration to target speed if not there
     const targetSpeed = Math.min(
-      RUN_SPEED_BASE + (this.level - 1) * SPEED_INCREMENT, 
-      RUN_SPEED_MAX
+      settings.startSpeed + (this.level - 1) * 0.04, 
+      settings.maxSpeed
     );
 
-    // Smooth acceleration towards target speed
     if (this.currentSpeed < targetSpeed) {
-      this.currentSpeed += ACCELERATION;
+      this.currentSpeed += settings.accel;
     }
 
     // 2. Move Player Forward
     this.player.position.z += this.currentSpeed;
 
-    // 3. Lateral Movement (Strafe)
-    // Smoothly interpolate towards target lane or just move raw
-    const moveSpeed = 0.15;
-    if (input.left) this.player.position.x -= moveSpeed;
-    if (input.right) this.player.position.x += moveSpeed;
+    // 3. Lateral Physics (Inertia-based)
+    if (input.left) {
+        this.player.velocity.x -= MOVE_ACCEL_X;
+    }
+    if (input.right) {
+        this.player.velocity.x += MOVE_ACCEL_X;
+    }
+    
+    // Apply Friction
+    this.player.velocity.x *= FRICTION_X;
 
-    // Clamp X
-    if (this.player.position.x < -LANE_WIDTH * 1.5) this.player.position.x = -LANE_WIDTH * 1.5;
-    if (this.player.position.x > LANE_WIDTH * 1.5) this.player.position.x = LANE_WIDTH * 1.5;
+    // Clamp Velocity
+    if (this.player.velocity.x > MAX_SPEED_X) this.player.velocity.x = MAX_SPEED_X;
+    if (this.player.velocity.x < -MAX_SPEED_X) this.player.velocity.x = -MAX_SPEED_X;
+
+    // Apply Position
+    this.player.position.x += this.player.velocity.x;
+
+    // Tilt Effect
+    this.player.tilt = -this.player.velocity.x * CAMERA_TILT_FACTOR;
+
+    // Clamp X Position (Walls)
+    const MAX_X = LANE_WIDTH * 1.8;
+    if (this.player.position.x < -MAX_X) {
+        this.player.position.x = -MAX_X;
+        this.player.velocity.x = 0;
+    }
+    if (this.player.position.x > MAX_X) {
+        this.player.position.x = MAX_X;
+        this.player.velocity.x = 0;
+    }
 
     // 4. Jump & Gravity
     if (input.jump && !this.player.isJumping) {
@@ -84,7 +128,7 @@ export class GameEngine {
     this.player.velocity.y -= GRAVITY;
     this.player.position.y += this.player.velocity.y;
 
-    // Ground Collision (Simple floor at y=0)
+    // Ground Collision
     if (this.player.position.y <= 0) {
       this.player.position.y = 0;
       this.player.velocity.y = 0;
@@ -92,7 +136,6 @@ export class GameEngine {
     }
 
     // 5. World Generation
-    // Generate ahead
     const renderDistance = 25;
     if (this.player.position.z + renderDistance > this.lastGenZ) {
       this.generateSlice(this.lastGenZ);
@@ -101,34 +144,43 @@ export class GameEngine {
 
     // Cleanup behind
     this.entities = this.entities.filter(e => e.position.z > this.player.position.z - 5);
-
+    
     // 6. Collision Detection
     this.checkCollisions();
+
+    // 7. Update Particles
+    this.updateParticles();
   }
 
   private generateSlice(z: number) {
+    const settings = DIFFICULTY_SETTINGS[this.difficulty];
+
     // Always ground
     for (let x = -2; x <= 2; x++) {
        this.entities.push({
          id: `ground_${z}_${x}`,
-         type: (x + z) % 2 === 0 ? BlockType.GRASS : BlockType.GRASS, // Pattern
+         type: (x + z) % 2 === 0 ? BlockType.GRASS : BlockType.GRASS,
          position: { x: x * LANE_WIDTH, y: -1, z },
          size: 1
        });
     }
 
-    // Random Obstacles & Collectibles (only after z > 10)
     if (z > 10) {
-      const lane = Math.floor(Math.random() * 3) - 1; // -1, 0, 1
+      const lane = Math.floor(Math.random() * 3) - 1; 
       const xPos = lane * LANE_WIDTH;
       const rand = Math.random();
 
-      // Difficulty scaler: slightly more obstacles as level increases
-      const obstacleChance = Math.min(0.15 + (this.level * 0.01), 0.3);
+      // Difficulty-based spawn rate
+      const obstacleChance = Math.min(settings.obstacleChance + (this.level * 0.01), 0.4);
 
       if (rand < obstacleChance) {
-        // Obstacle: TNT or Stone
-        const type = Math.random() > 0.5 ? BlockType.TNT : BlockType.STONE;
+        // Obstacle Selection based on Level
+        let availableObstacles = [BlockType.STONE, BlockType.TNT];
+        if (this.level >= 2) availableObstacles.push(BlockType.CREEPER);
+        if (this.level >= 3) availableObstacles.push(BlockType.SKELETON);
+
+        const type = availableObstacles[Math.floor(Math.random() * availableObstacles.length)];
+
         this.entities.push({
           id: `obs_${z}`,
           type,
@@ -136,22 +188,21 @@ export class GameEngine {
           size: 1
         });
         
-        // Sometimes stack them
-        if (Math.random() > 0.7) {
+        // Stack logic (less likely for mobs)
+        if (Math.random() > 0.7 && type !== BlockType.CREEPER && type !== BlockType.SKELETON) {
            this.entities.push({
             id: `obs_stack_${z}`,
-            type,
+            type: Math.random() > 0.5 ? BlockType.TNT : BlockType.STONE,
             position: { x: xPos, y: 1, z },
             size: 1
           });
         }
-      } else if (rand > 0.6 && rand < 0.8) {
-        // Collectible: Gold
-        // Often in a row
+      } else if (rand > 0.5 && rand < 0.8) { 
+        // Higher chance for gold to help players progress
         this.entities.push({
           id: `gold_${z}`,
           type: BlockType.GOLD,
-          position: { x: xPos, y: 0.5 + (Math.sin(z) * 0.2), z }, // Float slightly
+          position: { x: xPos, y: 0.5 + (Math.sin(z) * 0.2), z },
           size: 0.5,
           rotation: 0
         });
@@ -172,7 +223,6 @@ export class GameEngine {
     for (const entity of this.entities) {
       if (entity.collected) continue;
 
-      // Simple AABB
       const dx = Math.abs(playerBox.x - entity.position.x);
       const dy = Math.abs(playerBox.y - entity.position.y);
       const dz = Math.abs(playerBox.z - entity.position.z);
@@ -191,16 +241,58 @@ export class GameEngine {
     if (entity.type === BlockType.GOLD) {
       entity.collected = true;
       this.score += 10;
-    } else if (entity.type === BlockType.TNT || entity.type === BlockType.STONE || entity.type === BlockType.LAVA) {
-      // Hit obstacle
-      this.lives -= 1;
-      entity.collected = true; // remove entity to prevent multi-hit
+      this.goldCollectedInLevel++;
+      this.spawnParticles(entity.position, '#FCEE4B', 10);
+    } else {
+      // Obstacle Hit
+      if (!entity.collected) { // Prevent double hits per frame
+          this.lives -= 1;
+          entity.collected = true;
+          
+          let color = '#7D7D7D';
+          if (entity.type === BlockType.TNT) color = '#DB3625';
+          if (entity.type === BlockType.CREEPER) color = '#0DA70D';
+          if (entity.type === BlockType.SKELETON) color = '#E3E3E3';
+          
+          this.spawnParticles(entity.position, color, 20);
+      }
     }
+  }
+
+  private spawnParticles(pos: Point3D, color: string, count: number) {
+      for(let i=0; i<count; i++) {
+          this.particles.push({
+              id: `p_${this.particleIdCounter++}`,
+              position: { x: pos.x, y: pos.y, z: pos.z },
+              velocity: { 
+                  x: (Math.random() - 0.5) * 0.4, 
+                  y: (Math.random()) * 0.4, 
+                  z: (Math.random() - 0.5) * 0.4 
+              },
+              life: 1.0,
+              color: color,
+              size: Math.random() * 0.2 + 0.05
+          });
+      }
+  }
+
+  private updateParticles() {
+      // Move particles
+      for (const p of this.particles) {
+          p.position.x += p.velocity.x;
+          p.position.y += p.velocity.y;
+          p.position.z += p.velocity.z;
+          p.velocity.y -= 0.02; // Gravity for particles
+          p.life -= 0.05;
+      }
+      // Remove dead particles
+      this.particles = this.particles.filter(p => p.life > 0);
   }
 
   public getState() {
     return {
       entities: this.entities,
+      particles: this.particles,
       player: this.player,
       score: this.score,
       lives: this.lives,
@@ -208,7 +300,9 @@ export class GameEngine {
       level: this.level,
       distance: this.player.position.z,
       isPlaying: this.lives > 0,
-      gameOver: this.lives <= 0
+      gameOver: this.lives <= 0,
+      goldCollected: this.goldCollectedInLevel,
+      levelTarget: this.levelTarget
     };
   }
 }
