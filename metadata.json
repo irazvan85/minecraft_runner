@@ -1,0 +1,5 @@
+{
+  "name": "Blocky Runner",
+  "description": "A high-speed FPV infinite runner with a voxel aesthetic. Collect gold, avoid TNT, and run as far as you can!",
+  "requestFramePermissions": []
+}
