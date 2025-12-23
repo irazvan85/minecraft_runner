@@ -112,7 +112,7 @@ export default function App() {
      const color = COLORS[type];
      return (
        <div className="flex items-center gap-4 mb-4">
-          <div className="w-12 h-12 relative transform rotate-6 hover:rotate-12 transition-transform shadow-lg border-2 border-black/20" 
+          <div className="w-12 h-12 relative transform rotate-6 hover:rotate-12 transition-transform shadow-lg border-2 border-black/20 shrink-0" 
                style={{ backgroundColor: color.front, boxShadow: `4px 4px 0px ${color.side}` }}>
                <div className="absolute top-0 w-full h-1/3" style={{ backgroundColor: color.top }}></div>
                {type === BlockType.TNT && <div className="absolute top-1/3 w-full h-1/3 bg-white/90 text-[8px] flex items-center justify-center font-bold text-black">TNT</div>}
@@ -121,7 +121,7 @@ export default function App() {
           </div>
           <div className="text-left">
             <div className="font-bold text-lg text-white">{label}</div>
-            <div className="text-sm text-gray-300">{desc}</div>
+            <div className="text-sm text-gray-300 leading-tight">{desc}</div>
           </div>
        </div>
      )
@@ -199,12 +199,12 @@ export default function App() {
 
       {/* Help Screen */}
       {appState === AppState.HELP && (
-        <div className="z-10 p-8 bg-black/80 backdrop-blur-md border-4 border-blue-500 rounded-lg shadow-[0_0_20px_rgba(59,130,246,0.5)] max-w-2xl w-full text-white">
-          <h2 className="text-4xl text-blue-400 mb-6 font-bold text-center border-b-2 border-blue-500/30 pb-4">HOW TO PLAY</h2>
+        <div className="z-10 p-8 bg-black/80 backdrop-blur-md border-4 border-blue-500 rounded-lg shadow-[0_0_20px_rgba(59,130,246,0.5)] max-w-4xl w-full text-white overflow-hidden max-h-[90vh] flex flex-col">
+          <h2 className="text-4xl text-blue-400 mb-6 font-bold text-center border-b-2 border-blue-500/30 pb-4 shrink-0">HOW TO PLAY</h2>
           
-          <div className="grid grid-cols-2 gap-8">
+          <div className="grid grid-cols-2 gap-8 overflow-y-auto pr-2">
             <div>
-              <h3 className="text-xl text-yellow-400 mb-4 font-bold uppercase tracking-wider">Controls</h3>
+              <h3 className="text-xl text-yellow-400 mb-4 font-bold uppercase tracking-wider sticky top-0 bg-black/80 p-2 z-10">Controls</h3>
               <div className="space-y-4 font-mono text-lg">
                 <div className="flex items-center gap-3">
                   <span className="bg-gray-700 p-2 rounded border-b-4 border-gray-900">A</span> / <span className="bg-gray-700 p-2 rounded border-b-4 border-gray-900">←</span> 
@@ -222,16 +222,20 @@ export default function App() {
             </div>
 
             <div>
-              <h3 className="text-xl text-yellow-400 mb-4 font-bold uppercase tracking-wider">Blocks</h3>
-              <BlockPreview type={BlockType.GOLD} label="Gold Block" desc="Collect to LEVEL UP!" />
-              <BlockPreview type={BlockType.CREEPER} label="Creeper" desc="Avoid! Appears Lvl 2+" />
-              <BlockPreview type={BlockType.SKELETON} label="Skeleton" desc="Avoid! Appears Lvl 3+" />
+              <h3 className="text-xl text-yellow-400 mb-4 font-bold uppercase tracking-wider sticky top-0 bg-black/80 p-2 z-10">Items & Enemies</h3>
+              <div className="grid grid-cols-1 gap-1">
+                  <BlockPreview type={BlockType.GOLD} label="Gold Block" desc="Collect to LEVEL UP! (+10 pts)" />
+                  <BlockPreview type={BlockType.TNT} label="TNT" desc="EXPLOSIVE! Avoid at all costs." />
+                  <BlockPreview type={BlockType.STONE} label="Stone" desc="Basic obstacle. Do not hit." />
+                  <BlockPreview type={BlockType.CREEPER} label="Creeper" desc="Sneaky enemy. Appears Lvl 2+" />
+                  <BlockPreview type={BlockType.SKELETON} label="Skeleton" desc="Spooky enemy. Appears Lvl 3+" />
+              </div>
             </div>
           </div>
 
           <button 
             onClick={() => setAppState(AppState.MENU)}
-            className="mt-8 w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded border-b-4 border-gray-900 active:border-b-0 active:translate-y-1 transition-all"
+            className="mt-8 w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded border-b-4 border-gray-900 active:border-b-0 active:translate-y-1 transition-all shrink-0"
           >
             BACK TO MENU
           </button>

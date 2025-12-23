@@ -70,16 +70,25 @@ export class GameEngine {
         this.level++;
         this.goldCollectedInLevel = 0;
         this.levelTarget += LEVEL_TARGET_INCREMENT;
-        // Boost speed slightly on level up
-        this.currentSpeed = Math.min(this.currentSpeed + 0.05, settings.maxSpeed + 0.2); // Allow exceeding base max slightly
+        
+        // Boost speed slightly on level up ONLY if not Easy
+        if (this.difficulty !== Difficulty.EASY) {
+             this.currentSpeed = Math.min(this.currentSpeed + 0.05, settings.maxSpeed + 0.2); 
+        }
     }
     
-    // Smooth acceleration to target speed if not there
-    const targetSpeed = Math.min(
-      settings.startSpeed + (this.level - 1) * 0.04, 
-      settings.maxSpeed
-    );
+    // Calculate target speed
+    let targetSpeed = settings.startSpeed;
+    
+    if (this.difficulty !== Difficulty.EASY) {
+        // Increase speed with level for Medium/Hard
+        targetSpeed = Math.min(
+          settings.startSpeed + (this.level - 1) * 0.04, 
+          settings.maxSpeed
+        );
+    }
 
+    // Smooth acceleration to target speed
     if (this.currentSpeed < targetSpeed) {
       this.currentSpeed += settings.accel;
     }
