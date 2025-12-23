@@ -48,6 +48,7 @@ export interface GameState {
   speed: number;
   lives: number;
   gameOver: boolean;
+  gameWon: boolean;
   level: number;
   particles: Particle[];
   goldCollected: number;

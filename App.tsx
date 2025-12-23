@@ -3,6 +3,7 @@ import { GameCanvas } from './components/GameCanvas';
 import { GameEngine } from './services/engine';
 import { COLORS } from './constants';
 import { BlockType, Difficulty, HighScore } from './types';
+import { audioService } from './services/audio';
 
 enum AppState {
   MENU,
@@ -85,6 +86,7 @@ export default function App() {
         alert("Please enter your name!");
         return;
     }
+    audioService.initialize();
     engineRef.current.reset(selectedDifficulty);
     inputState.current = { left: false, right: false, jump: false };
     setAppState(AppState.PLAYING);
@@ -105,6 +107,11 @@ export default function App() {
     setHighScores(newScores);
     localStorage.setItem('blockyRunnerHighScores', JSON.stringify(newScores));
     
+    if (score >= 250) {
+      audioService.playWin();
+    } else {
+      audioService.playGameOver();
+    }
     setAppState(AppState.GAME_OVER);
   };
 
@@ -253,9 +260,13 @@ export default function App() {
 
       {/* Game Over Screen */}
       {appState === AppState.GAME_OVER && (
-        <div className="z-10 text-center p-8 bg-red-900/80 backdrop-blur-sm border-4 border-red-600 rounded-lg shadow-[0_0_30px_rgba(255,0,0,0.5)] min-w-[300px]">
-          <h2 className="text-5xl text-red-200 mb-2 font-bold">GAME OVER</h2>
-          <div className="text-xl text-white mb-6">Good run, {playerName}!</div>
+        <div className={`z-10 text-center p-8 backdrop-blur-sm border-4 rounded-lg shadow-[0_0_30px_rgba(0,0,0,0.5)] min-w-[300px] ${finalScore >= 250 ? 'bg-green-900/80 border-green-500 shadow-[0_0_30px_rgba(0,255,0,0.5)]' : 'bg-red-900/80 border-red-600 shadow-[0_0_30px_rgba(255,0,0,0.5)]'}`}>
+          <h2 className={`text-5xl mb-2 font-bold ${finalScore >= 250 ? 'text-green-200' : 'text-red-200'}`}>
+            {finalScore >= 250 ? 'YOU WIN!' : 'GAME OVER'}
+          </h2>
+          <div className="text-xl text-white mb-6">
+            {finalScore >= 250 ? 'Great job' : 'Better luck next time'}
+          </div>
           <div className="text-4xl text-yellow-400 mb-8 font-mono border-2 border-yellow-600 p-4 bg-black/30 rounded inline-block">Score: {finalScore}</div>
           
           <div className="flex gap-4 justify-center">

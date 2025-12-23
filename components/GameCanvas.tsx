@@ -296,15 +296,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     const state = engine.getState();
 
     // UI Updates
-    if (scoreRef.current) scoreRef.current.innerText = `SCORE: ${state.score}`;
+    if (scoreRef.current) scoreRef.current.innerText = `SCORE: ${state.score} / 250`;
     if (levelRef.current) levelRef.current.innerText = `LEVEL: ${state.level}`;
-    if (goldRef.current) goldRef.current.innerText = `TARGET: ${state.goldCollected} / ${state.levelTarget}`;
+    if (goldRef.current) goldRef.current.innerText = `GOLD: ${state.goldCollected} / ${state.levelTarget}`;
     if (livesRef.current) {
         let hearts = '';
         for(let i=0; i<state.lives; i++) hearts += '❤️';
         livesRef.current.innerText = hearts;
     }
-    if (state.lives <= 0) {
+    
+    // Game Over / Win Condition
+    if (state.lives <= 0 || state.gameWon) {
       onGameOver(state.score);
       return; 
     }
@@ -393,9 +395,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     <div className="relative w-full h-full">
       <canvas ref={canvasRef} className="block w-full h-full" />
       <div className="absolute top-4 left-4 text-4xl text-white font-bold tracking-widest drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] select-none pointer-events-none flex flex-col gap-2">
-         <div ref={scoreRef} className="text-yellow-400">SCORE: 0</div>
+         <div ref={scoreRef} className="text-yellow-400">SCORE: 0 / 250</div>
          <div ref={levelRef} className="text-blue-200 text-2xl">LEVEL: 1</div>
-         <div ref={goldRef} className="text-yellow-200 text-xl font-mono">TARGET: 0/0</div>
+         <div ref={goldRef} className="text-yellow-200 text-xl font-mono">GOLD: 0/0</div>
          <div ref={livesRef}>❤️❤️❤️</div>
       </div>
       <div className="absolute top-4 right-4 text-white/70 text-sm font-mono select-none bg-black/30 p-2 rounded">

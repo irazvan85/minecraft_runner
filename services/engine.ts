@@ -11,6 +11,7 @@ import {
   BASE_LEVEL_TARGET,
   LEVEL_TARGET_INCREMENT
 } from '../constants';
+import { audioService } from './audio';
 
 export class GameEngine {
   public entities: Entity[] = [];
@@ -31,6 +32,7 @@ export class GameEngine {
   private particleIdCounter = 0;
   private goldCollectedInLevel = 0;
   private levelTarget = BASE_LEVEL_TARGET;
+  private gameWon = false;
 
   constructor() {
     this.reset(Difficulty.MEDIUM);
@@ -55,6 +57,7 @@ export class GameEngine {
     this.level = 1;
     this.goldCollectedInLevel = 0;
     this.levelTarget = BASE_LEVEL_TARGET;
+    this.gameWon = false;
     
     // Initial ground generation
     for (let z = 0; z < 25; z++) {
@@ -63,6 +66,8 @@ export class GameEngine {
   }
 
   update(input: { left: boolean; right: boolean; jump: boolean }, deltaTime: number) {
+    if (this.gameWon) return;
+
     const settings = DIFFICULTY_SETTINGS[this.difficulty];
 
     // 1. Leveling Logic (Gold Based)
@@ -132,6 +137,7 @@ export class GameEngine {
     if (input.jump && !this.player.isJumping) {
       this.player.velocity.y = JUMP_FORCE;
       this.player.isJumping = true;
+      audioService.playJump();
     }
 
     this.player.velocity.y -= GRAVITY;
@@ -252,6 +258,13 @@ export class GameEngine {
       this.score += 10;
       this.goldCollectedInLevel++;
       this.spawnParticles(entity.position, '#FCEE4B', 10);
+      audioService.playCollect();
+      
+      // WIN CONDITION
+      if (this.score >= 250) {
+        this.gameWon = true;
+      }
+
     } else {
       // Obstacle Hit
       if (!entity.collected) { // Prevent double hits per frame
@@ -264,6 +277,7 @@ export class GameEngine {
           if (entity.type === BlockType.SKELETON) color = '#E3E3E3';
           
           this.spawnParticles(entity.position, color, 20);
+          audioService.playHit();
       }
     }
   }
@@ -308,8 +322,9 @@ export class GameEngine {
       speed: this.currentSpeed,
       level: this.level,
       distance: this.player.position.z,
-      isPlaying: this.lives > 0,
+      isPlaying: this.lives > 0 && !this.gameWon,
       gameOver: this.lives <= 0,
+      gameWon: this.gameWon,
       goldCollected: this.goldCollectedInLevel,
       levelTarget: this.levelTarget
     };
