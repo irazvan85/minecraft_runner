@@ -53,6 +53,7 @@ export interface GameState {
   particles: Particle[];
   goldCollected: number;
   levelTarget: number;
+  shakeIntensity: number;
 }
 
 export interface PlayerState {

@@ -33,6 +33,7 @@ export class GameEngine {
   private goldCollectedInLevel = 0;
   private levelTarget = BASE_LEVEL_TARGET;
   private gameWon = false;
+  private shakeIntensity = 0;
 
   constructor() {
     this.reset(Difficulty.MEDIUM);
@@ -58,6 +59,7 @@ export class GameEngine {
     this.goldCollectedInLevel = 0;
     this.levelTarget = BASE_LEVEL_TARGET;
     this.gameWon = false;
+    this.shakeIntensity = 0;
     
     // Initial ground generation
     for (let z = 0; z < 25; z++) {
@@ -67,6 +69,13 @@ export class GameEngine {
 
   update(input: { left: boolean; right: boolean; jump: boolean }, deltaTime: number) {
     if (this.gameWon) return;
+
+    // Decay Shake
+    if (this.shakeIntensity > 0.001) {
+        this.shakeIntensity *= 0.85; // Decay factor
+    } else {
+        this.shakeIntensity = 0;
+    }
 
     const settings = DIFFICULTY_SETTINGS[this.difficulty];
 
@@ -271,26 +280,38 @@ export class GameEngine {
           this.lives -= 1;
           entity.collected = true;
           
-          let color = '#7D7D7D';
-          if (entity.type === BlockType.TNT) color = '#DB3625';
-          if (entity.type === BlockType.CREEPER) color = '#0DA70D';
-          if (entity.type === BlockType.SKELETON) color = '#E3E3E3';
+          if (entity.type === BlockType.TNT) {
+              // TNT EXPLOSION
+              this.shakeIntensity = 0.5; // High shake amplitude
+              
+              // Multiple colored bursts for explosion
+              this.spawnParticles(entity.position, '#DB3625', 20, 2.0); // Red core
+              this.spawnParticles(entity.position, '#FF8C00', 20, 1.8); // Orange mid
+              this.spawnParticles(entity.position, '#FFFF00', 15, 1.5); // Yellow outer
+              this.spawnParticles(entity.position, '#FFFFFF', 10, 2.5); // White sparks
+          } else {
+              // Standard obstacle particles
+              let color = '#7D7D7D';
+              if (entity.type === BlockType.CREEPER) color = '#0DA70D';
+              if (entity.type === BlockType.SKELETON) color = '#E3E3E3';
+              
+              this.spawnParticles(entity.position, color, 20);
+          }
           
-          this.spawnParticles(entity.position, color, 20);
           audioService.playHit();
       }
     }
   }
 
-  private spawnParticles(pos: Point3D, color: string, count: number) {
+  private spawnParticles(pos: Point3D, color: string, count: number, speedMult: number = 1.0) {
       for(let i=0; i<count; i++) {
           this.particles.push({
               id: `p_${this.particleIdCounter++}`,
               position: { x: pos.x, y: pos.y, z: pos.z },
               velocity: { 
-                  x: (Math.random() - 0.5) * 0.4, 
-                  y: (Math.random()) * 0.4, 
-                  z: (Math.random() - 0.5) * 0.4 
+                  x: (Math.random() - 0.5) * 0.4 * speedMult, 
+                  y: (Math.random()) * 0.4 * speedMult, 
+                  z: (Math.random() - 0.5) * 0.4 * speedMult
               },
               life: 1.0,
               color: color,
@@ -326,7 +347,8 @@ export class GameEngine {
       gameOver: this.lives <= 0,
       gameWon: this.gameWon,
       goldCollected: this.goldCollectedInLevel,
-      levelTarget: this.levelTarget
+      levelTarget: this.levelTarget,
+      shakeIntensity: this.shakeIntensity
     };
   }
 }

@@ -323,10 +323,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
 
     // Camera State
     const bob = Math.sin(time * 0.015) * 0.05 * (state.speed / 0.5);
-    const camX = state.player.position.x;
-    const camY = state.player.position.y + 1.6 + bob;
-    const camZ = state.player.position.z - 0.5;
+    let camX = state.player.position.x;
+    let camY = state.player.position.y + 1.6 + bob;
+    let camZ = state.player.position.z - 0.5;
     const tilt = state.player.tilt;
+
+    // Apply Screen Shake
+    if (state.shakeIntensity > 0) {
+       camX += (Math.random() - 0.5) * state.shakeIntensity;
+       camY += (Math.random() - 0.5) * state.shakeIntensity;
+    }
 
     // Entities
     const sortedEntities = [...state.entities].sort((a, b) => b.position.z - a.position.z);
