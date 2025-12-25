@@ -23,7 +23,8 @@ export default function App() {
   const inputState = useRef({
     left: false,
     right: false,
-    jump: false
+    jump: false,
+    phase: false
   });
 
   // Load High Scores
@@ -52,6 +53,9 @@ export default function App() {
         case 'KeyW':
           inputState.current.jump = true;
           break;
+        case 'KeyB':
+          inputState.current.phase = true;
+          break;
       }
     };
 
@@ -69,6 +73,9 @@ export default function App() {
         case 'ArrowUp':
         case 'KeyW':
           inputState.current.jump = false;
+          break;
+        case 'KeyB':
+          inputState.current.phase = false;
           break;
       }
     };
@@ -88,7 +95,7 @@ export default function App() {
     }
     audioService.initialize();
     engineRef.current.reset(selectedDifficulty);
-    inputState.current = { left: false, right: false, jump: false };
+    inputState.current = { left: false, right: false, jump: false, phase: false };
     setAppState(AppState.PLAYING);
   };
 
@@ -223,7 +230,11 @@ export default function App() {
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="bg-gray-700 p-2 px-4 rounded border-b-4 border-gray-900">SPACE</span> 
-                  <span>Jump</span>
+                  <span>Jump / Double Jump</span>
+                </div>
+                 <div className="flex items-center gap-3">
+                  <span className="bg-gray-700 p-2 px-4 rounded border-b-4 border-gray-900">B</span> 
+                  <span>Phase (Ghost Mode)</span>
                 </div>
               </div>
             </div>

@@ -6,7 +6,7 @@ import { Entity, BlockType, Point3D } from '../types';
 interface GameCanvasProps {
   engine: GameEngine;
   onGameOver: (score: number) => void;
-  inputState: { current: { left: boolean; right: boolean; jump: boolean } };
+  inputState: { current: { left: boolean; right: boolean; jump: boolean; phase?: boolean } };
 }
 
 const FOV = 450;
@@ -19,6 +19,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
   const levelRef = useRef<HTMLDivElement>(null);
   const goldRef = useRef<HTMLDivElement>(null);
   const livesRef = useRef<HTMLDivElement>(null);
+  const abilitiesRef = useRef<HTMLDivElement>(null);
 
   // --- Helpers ---
 
@@ -80,13 +81,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     type: BlockType, 
     face: 'TOP' | 'SIDE' | 'FRONT', 
     p1: any, p2: any, p3: any, p4: any, 
-    dist: number
+    dist: number,
+    phaseActive: boolean
   ) => {
     const baseColor = COLORS[type];
     
     // Base
     const colorKey = face === 'TOP' ? 'top' : (face === 'SIDE' ? 'side' : 'front');
     const color = applyFog(baseColor[colorKey], dist);
+    
+    if (phaseActive && type !== BlockType.GOLD) {
+       ctx.globalAlpha = 0.5; // Ghostly
+    }
+
     drawQuad(ctx, p1, p2, p3, p4, color);
 
     // Details 
@@ -229,13 +236,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     ctx.strokeStyle = `rgba(0,0,0,${Math.max(0, 0.1 - dist/100)})`;
     ctx.lineWidth = 1;
     ctx.stroke();
+    
+    ctx.globalAlpha = 1.0; // Reset Alpha
   };
 
   const drawCube = useCallback((
     ctx: CanvasRenderingContext2D, 
     entity: Entity, 
     camX: number, camY: number, camZ: number, tilt: number,
-    width: number, height: number
+    width: number, height: number,
+    phaseActive: boolean
   ) => {
     if (entity.collected) return;
 
@@ -274,15 +284,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     if (!p.ft || !p.ftr || !p.fb || !p.fbr || !p.bt || !p.btr) return;
 
     if (z - hs > camZ + 0.1) {
-       drawFaceDetails(ctx, entity.type, 'FRONT', p.ft, p.ftr, p.fbr, p.fb, dist);
+       drawFaceDetails(ctx, entity.type, 'FRONT', p.ft, p.ftr, p.fbr, p.fb, dist, phaseActive);
     }
     if (x < camX) {
-        if (p.bbr) drawFaceDetails(ctx, entity.type, 'SIDE', p.ftr, p.btr, p.bbr, p.fbr, dist);
+        if (p.bbr) drawFaceDetails(ctx, entity.type, 'SIDE', p.ftr, p.btr, p.bbr, p.fbr, dist, phaseActive);
     } else {
-        if (p.bb) drawFaceDetails(ctx, entity.type, 'SIDE', p.bt, p.ft, p.fb, p.bb, dist);
+        if (p.bb) drawFaceDetails(ctx, entity.type, 'SIDE', p.bt, p.ft, p.fb, p.bb, dist, phaseActive);
     }
     if (y < camY) {
-         drawFaceDetails(ctx, entity.type, 'TOP', p.bt, p.btr, p.ftr, p.ft, dist);
+         drawFaceDetails(ctx, entity.type, 'TOP', p.bt, p.btr, p.ftr, p.ft, dist, phaseActive);
     }
   }, [project, applyFog]);
 
@@ -305,6 +315,37 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
         livesRef.current.innerText = hearts;
     }
     
+    // HUD - Abilities
+    if (abilitiesRef.current) {
+        const phaseCD = Math.ceil(state.player.phaseCooldown / 1000);
+        const jumpCD = Math.ceil(state.player.doubleJumpCooldown / 1000);
+        const phaseRemaining = Math.ceil(state.player.phaseTimeRemaining / 1000);
+
+        let html = '';
+        
+        // Double Jump
+        html += `<div class="flex flex-col items-center">
+                   <div class="w-10 h-10 border-2 ${jumpCD <= 0 ? 'border-green-400 bg-green-900/50' : 'border-red-400 bg-red-900/50'} flex items-center justify-center text-xs font-bold relative">
+                       DJ
+                       ${jumpCD > 0 ? `<div class="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm">${jumpCD}</div>` : ''}
+                   </div>
+                   <span class="text-[10px] mt-1 text-gray-400">JUMP</span>
+                 </div>`;
+        
+        // Phase
+        html += `<div class="flex flex-col items-center">
+                   <div class="w-10 h-10 border-2 ${state.player.phaseActive ? 'border-cyan-400 bg-cyan-900/50 animate-pulse' : (phaseCD <= 0 ? 'border-green-400 bg-green-900/50' : 'border-red-400 bg-red-900/50')} flex items-center justify-center text-xs font-bold relative">
+                       PH
+                       ${state.player.phaseActive ? `<div class="absolute inset-0 flex items-center justify-center text-cyan-200 text-sm">${phaseRemaining}</div>` : ''}
+                       ${!state.player.phaseActive && phaseCD > 0 ? `<div class="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm">${phaseCD}</div>` : ''}
+                   </div>
+                   <span class="text-[10px] mt-1 text-gray-400">"B"</span>
+                 </div>`;
+
+        abilitiesRef.current.innerHTML = html;
+    }
+
+    
     // Game Over / Win Condition
     if (state.lives <= 0 || state.gameWon) {
       onGameOver(state.score);
@@ -316,8 +357,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     
     // Sky
     const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
-    skyGrad.addColorStop(0, '#4ea7d6');
-    skyGrad.addColorStop(1, '#87CEEB');
+    if (state.player.phaseActive) {
+         // Tint sky cyan when phased
+         skyGrad.addColorStop(0, '#004455');
+         skyGrad.addColorStop(1, '#0088AA');
+    } else {
+         skyGrad.addColorStop(0, '#4ea7d6');
+         skyGrad.addColorStop(1, '#87CEEB');
+    }
+    
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, height);
 
@@ -337,7 +385,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     // Entities
     const sortedEntities = [...state.entities].sort((a, b) => b.position.z - a.position.z);
     for (const entity of sortedEntities) {
-      drawCube(ctx, entity, camX, camY, camZ, tilt, width, height);
+      drawCube(ctx, entity, camX, camY, camZ, tilt, width, height, state.player.phaseActive);
     }
 
     // Particles
@@ -354,7 +402,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
 
     // Speed Lines
     if (state.speed > 0.6) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.strokeStyle = state.player.phaseActive ? 'rgba(0, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 2;
       for (let i = 0; i < 6; i++) {
         const x = Math.random() * width;
@@ -371,7 +419,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     }
 
     // Crosshair
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.strokeStyle = state.player.phaseActive ? 'rgba(0, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(width/2 - 8, height/2);
@@ -406,8 +454,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
          <div ref={goldRef} className="text-yellow-200 text-xl font-mono">GOLD: 0/0</div>
          <div ref={livesRef}>❤️❤️❤️</div>
       </div>
+      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-6 text-white" ref={abilitiesRef}>
+         {/* HUD Injected by JS */}
+      </div>
       <div className="absolute top-4 right-4 text-white/70 text-sm font-mono select-none bg-black/30 p-2 rounded">
-        WASD to Move • SPACE to Jump
+        WASD to Move • SPACE to Jump • B to Phase
       </div>
     </div>
   );

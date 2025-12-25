@@ -61,6 +61,12 @@ export interface PlayerState {
   velocity: Point3D;
   isJumping: boolean;
   tilt: number; // Camera tilt
+  jumpCount: number;
+  // Abilities
+  phaseActive: boolean;
+  phaseTimeRemaining: number;
+  phaseCooldown: number;
+  doubleJumpCooldown: number;
 }
 
 export interface HighScore {

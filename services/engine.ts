@@ -20,7 +20,12 @@ export class GameEngine {
     position: { x: 0, y: 0, z: 0 },
     velocity: { x: 0, y: 0, z: 0 },
     isJumping: false,
-    tilt: 0
+    tilt: 0,
+    jumpCount: 0,
+    phaseActive: false,
+    phaseTimeRemaining: 0,
+    phaseCooldown: 0,
+    doubleJumpCooldown: 0
   };
   
   private lastGenZ = 10;
@@ -34,6 +39,7 @@ export class GameEngine {
   private levelTarget = BASE_LEVEL_TARGET;
   private gameWon = false;
   private shakeIntensity = 0;
+  private lastJumpInput = false;
 
   constructor() {
     this.reset(Difficulty.MEDIUM);
@@ -47,7 +53,12 @@ export class GameEngine {
       position: { x: 0, y: 0, z: 0 },
       velocity: { x: 0, y: 0, z: 0 },
       isJumping: false,
-      tilt: 0
+      tilt: 0,
+      jumpCount: 0,
+      phaseActive: false,
+      phaseTimeRemaining: 0,
+      phaseCooldown: 0,
+      doubleJumpCooldown: 0
     };
     this.entities = [];
     this.particles = [];
@@ -60,6 +71,7 @@ export class GameEngine {
     this.levelTarget = BASE_LEVEL_TARGET;
     this.gameWon = false;
     this.shakeIntensity = 0;
+    this.lastJumpInput = false;
     
     // Initial ground generation
     for (let z = 0; z < 25; z++) {
@@ -67,7 +79,7 @@ export class GameEngine {
     }
   }
 
-  update(input: { left: boolean; right: boolean; jump: boolean }, deltaTime: number) {
+  update(input: { left: boolean; right: boolean; jump: boolean; phase?: boolean }, deltaTime: number) {
     if (this.gameWon) return;
 
     // Decay Shake
@@ -75,6 +87,23 @@ export class GameEngine {
         this.shakeIntensity *= 0.85; // Decay factor
     } else {
         this.shakeIntensity = 0;
+    }
+
+    // Update Abilities
+    if (this.player.phaseTimeRemaining > 0) {
+        this.player.phaseTimeRemaining -= deltaTime;
+        if (this.player.phaseTimeRemaining <= 0) this.player.phaseActive = false;
+    }
+    if (this.player.phaseCooldown > 0) this.player.phaseCooldown -= deltaTime;
+    if (this.player.doubleJumpCooldown > 0) this.player.doubleJumpCooldown -= deltaTime;
+
+    // Activate Phase
+    if (input.phase && this.player.phaseCooldown <= 0) {
+        this.player.phaseActive = true;
+        this.player.phaseTimeRemaining = 5000; // 5 seconds
+        this.player.phaseCooldown = 20000; // 20 seconds cooldown
+        // Visual cue for activation
+        this.spawnParticles(this.player.position, '#00FFFF', 20, 1.5);
     }
 
     const settings = DIFFICULTY_SETTINGS[this.difficulty];
@@ -142,11 +171,26 @@ export class GameEngine {
         this.player.velocity.x = 0;
     }
 
-    // 4. Jump & Gravity
-    if (input.jump && !this.player.isJumping) {
-      this.player.velocity.y = JUMP_FORCE;
-      this.player.isJumping = true;
-      audioService.playJump();
+    // 4. Jump & Gravity (Double Jump Logic)
+    const jumpPressed = input.jump && !this.lastJumpInput;
+    this.lastJumpInput = input.jump;
+
+    if (jumpPressed) {
+        if (!this.player.isJumping) {
+            // First Jump
+            this.player.velocity.y = JUMP_FORCE;
+            this.player.isJumping = true;
+            this.player.jumpCount = 1;
+            audioService.playJump();
+        } else if (this.player.jumpCount < 2 && this.player.doubleJumpCooldown <= 0) {
+            // Double Jump (Only if cooldown is 0)
+            this.player.velocity.y = JUMP_FORCE * 0.9;
+            this.player.jumpCount = 2;
+            this.player.doubleJumpCooldown = 20000; // 20 seconds cooldown
+            audioService.playJump();
+            // Visual feedback: puff
+            this.spawnParticles(this.player.position, '#FFFFFF', 8, 0.5);
+        }
     }
 
     this.player.velocity.y -= GRAVITY;
@@ -157,6 +201,7 @@ export class GameEngine {
       this.player.position.y = 0;
       this.player.velocity.y = 0;
       this.player.isJumping = false;
+      this.player.jumpCount = 0; // Reset jumps
     }
 
     // 5. World Generation
@@ -276,6 +321,8 @@ export class GameEngine {
 
     } else {
       // Obstacle Hit
+      if (this.player.phaseActive) return; // IGNORE OBSTACLE COLLISIONS IF PHASED
+
       if (!entity.collected) { // Prevent double hits per frame
           this.lives -= 1;
           entity.collected = true;
