@@ -63,7 +63,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     return { x: x2d, y: y2d, scale, dist: rz };
   }, []);
 
-  // --- Drawing ---
+  // --- Drawing Primitives ---
 
   const drawQuad = (ctx: CanvasRenderingContext2D, p1: any, p2: any, p3: any, p4: any, color: string) => {
     ctx.fillStyle = color;
@@ -74,7 +74,186 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     ctx.lineTo(p4.x, p4.y);
     ctx.closePath();
     ctx.fill();
+    // ctx.stroke(); // Debug outline
   };
+
+  // --- Steve Drawing ---
+  const drawStevePart = (
+      ctx: CanvasRenderingContext2D,
+      p: Point3D, // Center position
+      size: { w: number, h: number, d: number },
+      colors: { front: string, back: string, top: string, bottom: string, left: string, right: string },
+      rotation: { x: number, y: number, z: number },
+      camX: number, camY: number, camZ: number, tilt: number,
+      width: number, height: number,
+      phaseActive: boolean
+  ) => {
+      const hw = size.w / 2;
+      const hh = size.h / 2;
+      const hd = size.d / 2;
+
+      // Local vertices
+      const verts = [
+          { x: -hw, y: hh, z: -hd }, { x: hw, y: hh, z: -hd }, { x: hw, y: -hh, z: -hd }, { x: -hw, y: -hh, z: -hd }, // Front
+          { x: -hw, y: hh, z: hd },  { x: hw, y: hh, z: hd },  { x: hw, y: -hh, z: hd },  { x: -hw, y: -hh, z: hd }   // Back
+      ];
+
+      // Rotate and Translate
+      const worldVerts = verts.map(v => {
+          // X Rotation (Pitch)
+          let y1 = v.y * Math.cos(rotation.x) - v.z * Math.sin(rotation.x);
+          let z1 = v.y * Math.sin(rotation.x) + v.z * Math.cos(rotation.x);
+          
+          // Z Rotation (Roll) - not used much here but good for completeness
+          let x2 = v.x * Math.cos(rotation.z) - y1 * Math.sin(rotation.z);
+          let y2 = v.x * Math.sin(rotation.z) + y1 * Math.cos(rotation.z);
+
+          // Translate
+          return {
+              x: x2 + p.x,
+              y: y2 + p.y,
+              z: z1 + p.z
+          };
+      });
+
+      // Project
+      const projVerts = worldVerts.map(v => project(v, camX, camY, camZ, width, height, tilt));
+
+      // Calculate Center Dist for Fog
+      const dist = Math.sqrt(Math.pow(p.x - camX, 2) + Math.pow(p.y - camY, 2) + Math.pow(p.z - camZ, 2));
+      
+      if (phaseActive) ctx.globalAlpha = 0.6;
+
+      // Draw Faces (Painter's algorithm per part isn't perfect but sufficient for convex separate parts)
+      // We rely on face normal culling implicitly by checking projection order or just drawing typical visible faces?
+      // Since we are behind, we see Back, Top/Bottom, Left/Right.
+      // We rarely see front.
+      
+      const drawFace = (idxs: number[], color: string, normal: 'FRONT' | 'BACK' | 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT') => {
+          if (idxs.some(i => !projVerts[i])) return;
+          const ps = idxs.map(i => projVerts[i]!);
+          
+          // Simple normal check (cross product z)
+          const v1 = { x: ps[1].x - ps[0].x, y: ps[1].y - ps[0].y };
+          const v2 = { x: ps[2].x - ps[1].x, y: ps[2].y - ps[1].y };
+          const cross = v1.x * v2.y - v1.y * v2.x;
+          
+          if (cross > 0) return; // Backface culling in 2D space (assuming CCW winding)
+          
+          drawQuad(ctx, ps[0], ps[1], ps[2], ps[3], applyFog(color, dist));
+      };
+
+      // Indices for CCW winding
+      // Front: 0,1,2,3
+      // Back: 5,4,7,6
+      // Top: 4,5,1,0
+      // Bottom: 3,2,6,7
+      // Left: 4,0,3,7
+      // Right: 1,5,6,2
+
+      drawFace([0,1,2,3], colors.front, 'FRONT');
+      drawFace([5,4,7,6], colors.back, 'BACK');
+      drawFace([4,5,1,0], colors.top, 'TOP');
+      drawFace([3,2,6,7], colors.bottom, 'BOTTOM');
+      drawFace([4,0,3,7], colors.left, 'LEFT');
+      drawFace([1,5,6,2], colors.right, 'RIGHT');
+
+      ctx.globalAlpha = 1.0;
+  };
+
+  const drawSteve = (
+      ctx: CanvasRenderingContext2D,
+      pos: Point3D,
+      camX: number, camY: number, camZ: number, tilt: number,
+      width: number, height: number,
+      phaseActive: boolean,
+      time: number,
+      isJumping: boolean
+  ) => {
+      // Animation state
+      const runAnim = isJumping ? 0.5 : Math.sin(time * 0.015) * 1.2;
+      
+      const skinColor = '#F3C09A';
+      const shirtColor = '#00AAAA'; // Cyan
+      const pantsColor = '#303090'; // Indigo
+      const shoesColor = '#111111';
+      
+      // -- LEGS --
+      // Dimensions: 0.25 x 0.75 x 0.25 approx
+      // Position relative to player center (x, 0, z)
+      // Player pos is ground level? No, player pos usually centroid or feet. Engine says feet y=0.
+      
+      const legW = 0.22; const legH = 0.7; const legD = 0.22;
+      const torsoW = 0.5; const torsoH = 0.65; const torsoD = 0.25;
+      const headS = 0.45;
+      const armW = 0.2; const armH = 0.7; const armD = 0.22;
+
+      const hipY = pos.y + legH;
+      const shoulderY = hipY + torsoH;
+      const neckY = shoulderY;
+
+      // Left Leg
+      drawStevePart(
+          ctx, 
+          { x: pos.x - 0.13, y: pos.y + legH/2, z: pos.z }, 
+          { w: legW, h: legH, d: legD }, 
+          { front: pantsColor, back: pantsColor, top: pantsColor, bottom: shoesColor, left: pantsColor, right: pantsColor },
+          { x: -runAnim * 0.5, y: 0, z: 0 },
+          camX, camY, camZ, tilt, width, height, phaseActive
+      );
+      
+      // Right Leg
+      drawStevePart(
+          ctx, 
+          { x: pos.x + 0.13, y: pos.y + legH/2, z: pos.z }, 
+          { w: legW, h: legH, d: legD }, 
+          { front: pantsColor, back: pantsColor, top: pantsColor, bottom: shoesColor, left: pantsColor, right: pantsColor },
+          { x: runAnim * 0.5, y: 0, z: 0 },
+          camX, camY, camZ, tilt, width, height, phaseActive
+      );
+
+      // Torso
+      drawStevePart(
+          ctx, 
+          { x: pos.x, y: hipY + torsoH/2, z: pos.z }, 
+          { w: torsoW, h: torsoH, d: torsoD }, 
+          { front: shirtColor, back: shirtColor, top: shirtColor, bottom: shirtColor, left: shirtColor, right: shirtColor },
+          { x: 0, y: 0, z: 0 },
+          camX, camY, camZ, tilt, width, height, phaseActive
+      );
+
+      // Head
+      drawStevePart(
+          ctx, 
+          { x: pos.x, y: neckY + headS/2, z: pos.z }, 
+          { w: headS, h: headS, d: headS }, 
+          { front: skinColor, back: '#3B2618', top: '#3B2618', bottom: skinColor, left: skinColor, right: skinColor },
+          { x: 0, y: 0, z: 0 }, // Maybe look up/down?
+          camX, camY, camZ, tilt, width, height, phaseActive
+      );
+
+      // Left Arm
+      drawStevePart(
+          ctx, 
+          { x: pos.x - 0.36, y: shoulderY - armH/2 + 0.1, z: pos.z }, 
+          { w: armW, h: armH, d: armD }, 
+          { front: skinColor, back: skinColor, top: shirtColor, bottom: skinColor, left: skinColor, right: skinColor },
+          { x: runAnim * 0.5, y: 0, z: 0 },
+          camX, camY, camZ, tilt, width, height, phaseActive
+      );
+
+      // Right Arm
+      drawStevePart(
+          ctx, 
+          { x: pos.x + 0.36, y: shoulderY - armH/2 + 0.1, z: pos.z }, 
+          { w: armW, h: armH, d: armD }, 
+          { front: skinColor, back: skinColor, top: shirtColor, bottom: skinColor, left: skinColor, right: skinColor },
+          { x: -runAnim * 0.5, y: 0, z: 0 },
+          camX, camY, camZ, tilt, width, height, phaseActive
+      );
+  }
+
+  // --- World Drawing ---
 
   const drawFaceDetails = (
     ctx: CanvasRenderingContext2D, 
@@ -148,20 +327,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     // CREEPER FACE
     if (type === BlockType.CREEPER && face === 'FRONT' && dist < 20) {
         ctx.fillStyle = applyFog('#000000', dist);
-        // Map 2D face features to the quad p1..p4 (TL, TR, BR, BL)
-        // Eyes
         const eyeW = 0.2; const eyeH = 0.2;
         const e1x = 0.2; const e1y = 0.25;
         const e2x = 0.6; const e2y = 0.25;
         
-        // Helper to map UV to XY
         const mapUV = (u: number, v: number) => {
             const topX = lerp(p1.x, p2.x, u); const topY = lerp(p1.y, p2.y, u);
             const botX = lerp(p4.x, p3.x, u); const botY = lerp(p4.y, p3.y, u);
             return { x: lerp(topX, botX, v), y: lerp(topY, botY, v) };
         }
         
-        // Draw Eyes
         const drawRect = (u: number, v: number, w: number, h: number) => {
              const tl = mapUV(u, v);
              const tr = mapUV(u+w, v);
@@ -170,11 +345,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
              drawQuad(ctx, tl, tr, br, bl, ctx.fillStyle as string);
         }
 
-        drawRect(e1x, e1y, eyeW, eyeH); // Left Eye
-        drawRect(e2x, e2y, eyeW, eyeH); // Right Eye
-        drawRect(0.35, 0.45, 0.3, 0.25); // Nose
-        drawRect(0.25, 0.6, 0.1, 0.2); // Mouth L
-        drawRect(0.65, 0.6, 0.1, 0.2); // Mouth R
+        drawRect(e1x, e1y, eyeW, eyeH); 
+        drawRect(e2x, e2y, eyeW, eyeH); 
+        drawRect(0.35, 0.45, 0.3, 0.25); 
+        drawRect(0.25, 0.6, 0.1, 0.2); 
+        drawRect(0.65, 0.6, 0.1, 0.2); 
     }
 
     // SKELETON FACE
@@ -283,17 +458,43 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
 
     if (!p.ft || !p.ftr || !p.fb || !p.fbr || !p.bt || !p.btr) return;
 
+    // Draw faces back to front? 
+    // Simplified logic: If Z of face center is > Z of entity center...
+    // But since we are looking down +Z mainly, we see Front, Top, and Side.
+    // Wait, TPV camera is at Z - 4. Entity is at Z. We see Back face?
+    // Camera is at PlayerZ - 4. World is +Z. 
+    // So we look at the Back of the entity if it is ahead of us.
+    // The existing drawCube was optimized for FPV looking forward (seeing Back? No, seeing Front/Side/Top of block in front).
+    
+    // Correction:
+    // If Entity Z > Camera Z (Entity is in front), we see its "Back" face (the face with lower Z)?
+    // Standard coordinates:
+    // +Z is into screen.
+    // Front face: Z - hs (Towards viewer if viewer is at -Z).
+    // Back face: Z + hs (Away from viewer).
+    // So if Camera is at Z-4, looking at Z, we see the face at Z-hs.
+    // The existing logic:
+    // `v.ft` is `z - hs`. This is the face CLOSEST to camera (if camera is -Z).
+    // So yes, `FRONT` is correct label for face at `z-hs`.
+    
+    // Logic:
+    // `z - hs > camZ + 0.1` -> The front face is in front of camera. Draw it.
     if (z - hs > camZ + 0.1) {
        drawFaceDetails(ctx, entity.type, 'FRONT', p.ft, p.ftr, p.fbr, p.fb, dist, phaseActive);
     }
+    
+    // Side
     if (x < camX) {
         if (p.bbr) drawFaceDetails(ctx, entity.type, 'SIDE', p.ftr, p.btr, p.bbr, p.fbr, dist, phaseActive);
     } else {
         if (p.bb) drawFaceDetails(ctx, entity.type, 'SIDE', p.bt, p.ft, p.fb, p.bb, dist, phaseActive);
     }
+    
+    // Top / Bottom
     if (y < camY) {
          drawFaceDetails(ctx, entity.type, 'TOP', p.bt, p.btr, p.ftr, p.ft, dist, phaseActive);
     }
+    // We usually don't see bottom
   }, [project, applyFog]);
 
   const loop = useCallback((time: number) => {
@@ -315,38 +516,16 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
         livesRef.current.innerText = hearts;
     }
     
-    // HUD - Abilities
     if (abilitiesRef.current) {
         const phaseCD = Math.ceil(state.player.phaseCooldown / 1000);
-        const jumpCD = Math.ceil(state.player.doubleJumpCooldown / 1000);
         const phaseRemaining = Math.ceil(state.player.phaseTimeRemaining / 1000);
-
+        const jumpAvailable = state.player.jumpCount < 2;
         let html = '';
-        
-        // Double Jump
-        html += `<div class="flex flex-col items-center">
-                   <div class="w-10 h-10 border-2 ${jumpCD <= 0 ? 'border-green-400 bg-green-900/50' : 'border-red-400 bg-red-900/50'} flex items-center justify-center text-xs font-bold relative">
-                       DJ
-                       ${jumpCD > 0 ? `<div class="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm">${jumpCD}</div>` : ''}
-                   </div>
-                   <span class="text-[10px] mt-1 text-gray-400">JUMP</span>
-                 </div>`;
-        
-        // Phase
-        html += `<div class="flex flex-col items-center">
-                   <div class="w-10 h-10 border-2 ${state.player.phaseActive ? 'border-cyan-400 bg-cyan-900/50 animate-pulse' : (phaseCD <= 0 ? 'border-green-400 bg-green-900/50' : 'border-red-400 bg-red-900/50')} flex items-center justify-center text-xs font-bold relative">
-                       PH
-                       ${state.player.phaseActive ? `<div class="absolute inset-0 flex items-center justify-center text-cyan-200 text-sm">${phaseRemaining}</div>` : ''}
-                       ${!state.player.phaseActive && phaseCD > 0 ? `<div class="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm">${phaseCD}</div>` : ''}
-                   </div>
-                   <span class="text-[10px] mt-1 text-gray-400">"B"</span>
-                 </div>`;
-
+        html += `<div class="flex flex-col items-center"><div class="w-10 h-10 border-2 ${jumpAvailable ? 'border-green-400 bg-green-900/50' : 'border-gray-500 bg-gray-900/50'} flex items-center justify-center text-xs font-bold relative">DJ</div><span class="text-[10px] mt-1 text-gray-400">JUMP</span></div>`;
+        html += `<div class="flex flex-col items-center"><div class="w-10 h-10 border-2 ${state.player.phaseActive ? 'border-cyan-400 bg-cyan-900/50 animate-pulse' : (phaseCD <= 0 ? 'border-green-400 bg-green-900/50' : 'border-red-400 bg-red-900/50')} flex items-center justify-center text-xs font-bold relative">PH${state.player.phaseActive ? `<div class="absolute inset-0 flex items-center justify-center text-cyan-200 text-sm">${phaseRemaining}</div>` : ''}${!state.player.phaseActive && phaseCD > 0 ? `<div class="absolute inset-0 flex items-center justify-center bg-black/60 text-white text-sm">${phaseCD}</div>` : ''}</div><span class="text-[10px] mt-1 text-gray-400">"B"</span></div>`;
         abilitiesRef.current.innerHTML = html;
     }
 
-    
-    // Game Over / Win Condition
     if (state.lives <= 0 || state.gameWon) {
       onGameOver(state.score);
       return; 
@@ -358,34 +537,47 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     // Sky
     const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
     if (state.player.phaseActive) {
-         // Tint sky cyan when phased
          skyGrad.addColorStop(0, '#004455');
          skyGrad.addColorStop(1, '#0088AA');
     } else {
          skyGrad.addColorStop(0, '#4ea7d6');
          skyGrad.addColorStop(1, '#87CEEB');
     }
-    
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // Camera State
+    // TPV Camera
     const bob = Math.sin(time * 0.015) * 0.05 * (state.speed / 0.5);
-    let camX = state.player.position.x;
-    let camY = state.player.position.y + 1.6 + bob;
-    let camZ = state.player.position.z - 0.5;
+    
+    // Camera trails behind player
+    let camX = state.player.position.x * 0.8; // Lag slightly on X for effect
+    let camY = state.player.position.y + 2.8 + bob; // Look from above
+    let camZ = state.player.position.z - 4.5; // Behind
     const tilt = state.player.tilt;
 
-    // Apply Screen Shake
     if (state.shakeIntensity > 0) {
        camX += (Math.random() - 0.5) * state.shakeIntensity;
        camY += (Math.random() - 0.5) * state.shakeIntensity;
     }
 
-    // Entities
+    // Sort Entities: Far to Near (Painter's Algorithm)
     const sortedEntities = [...state.entities].sort((a, b) => b.position.z - a.position.z);
+    
+    let steveDrawn = false;
+
+    // Draw Loop
     for (const entity of sortedEntities) {
-      drawCube(ctx, entity, camX, camY, camZ, tilt, width, height, state.player.phaseActive);
+        // If we reach entities closer than player, draw player first
+        if (!steveDrawn && entity.position.z < state.player.position.z) {
+            drawSteve(ctx, state.player.position, camX, camY, camZ, tilt, width, height, state.player.phaseActive, time, state.player.isJumping);
+            steveDrawn = true;
+        }
+        drawCube(ctx, entity, camX, camY, camZ, tilt, width, height, state.player.phaseActive);
+    }
+    
+    // Fallback if player is closer than all entities
+    if (!steveDrawn) {
+         drawSteve(ctx, state.player.position, camX, camY, camZ, tilt, width, height, state.player.phaseActive, time, state.player.isJumping);
     }
 
     // Particles
@@ -400,33 +592,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
         }
     }
 
-    // Speed Lines
+    // Speed Lines (Only if fast)
     if (state.speed > 0.6) {
       ctx.strokeStyle = state.player.phaseActive ? 'rgba(0, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 2;
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 4; i++) {
         const x = Math.random() * width;
         const y = Math.random() * height;
-        const len = Math.random() * 80 + 20;
+        const len = Math.random() * 50 + 20;
         const cx = width/2; const cy = height/2;
         const angle = Math.atan2(y-cy, x-cx);
-        
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.lineTo(x + Math.cos(angle)*len, y + Math.sin(angle)*len);
         ctx.stroke();
       }
     }
-
-    // Crosshair
-    ctx.strokeStyle = state.player.phaseActive ? 'rgba(0, 255, 255, 0.6)' : 'rgba(255, 255, 255, 0.6)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(width/2 - 8, height/2);
-    ctx.lineTo(width/2 + 8, height/2);
-    ctx.moveTo(width/2, height/2 - 8);
-    ctx.lineTo(width/2, height/2 + 8);
-    ctx.stroke();
 
     requestRef.current = requestAnimationFrame(loop);
   }, [engine, inputState, onGameOver, drawCube, project]);
@@ -454,9 +635,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
          <div ref={goldRef} className="text-yellow-200 text-xl font-mono">GOLD: 0/0</div>
          <div ref={livesRef}>❤️❤️❤️</div>
       </div>
-      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-6 text-white" ref={abilitiesRef}>
-         {/* HUD Injected by JS */}
-      </div>
+      <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex gap-6 text-white" ref={abilitiesRef}></div>
       <div className="absolute top-4 right-4 text-white/70 text-sm font-mono select-none bg-black/30 p-2 rounded">
         WASD to Move • SPACE to Jump • B to Phase
       </div>

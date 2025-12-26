@@ -66,7 +66,6 @@ export interface PlayerState {
   phaseActive: boolean;
   phaseTimeRemaining: number;
   phaseCooldown: number;
-  doubleJumpCooldown: number;
 }
 
 export interface HighScore {

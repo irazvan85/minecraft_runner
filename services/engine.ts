@@ -24,8 +24,7 @@ export class GameEngine {
     jumpCount: 0,
     phaseActive: false,
     phaseTimeRemaining: 0,
-    phaseCooldown: 0,
-    doubleJumpCooldown: 0
+    phaseCooldown: 0
   };
   
   private lastGenZ = 10;
@@ -40,6 +39,7 @@ export class GameEngine {
   private gameWon = false;
   private shakeIntensity = 0;
   private lastJumpInput = false;
+  private lastPhaseInput = false;
 
   constructor() {
     this.reset(Difficulty.MEDIUM);
@@ -57,8 +57,7 @@ export class GameEngine {
       jumpCount: 0,
       phaseActive: false,
       phaseTimeRemaining: 0,
-      phaseCooldown: 0,
-      doubleJumpCooldown: 0
+      phaseCooldown: 0
     };
     this.entities = [];
     this.particles = [];
@@ -72,6 +71,7 @@ export class GameEngine {
     this.gameWon = false;
     this.shakeIntensity = 0;
     this.lastJumpInput = false;
+    this.lastPhaseInput = false;
     
     // Initial ground generation
     for (let z = 0; z < 25; z++) {
@@ -94,14 +94,18 @@ export class GameEngine {
         this.player.phaseTimeRemaining -= deltaTime;
         if (this.player.phaseTimeRemaining <= 0) this.player.phaseActive = false;
     }
-    if (this.player.phaseCooldown > 0) this.player.phaseCooldown -= deltaTime;
-    if (this.player.doubleJumpCooldown > 0) this.player.doubleJumpCooldown -= deltaTime;
+    if (this.player.phaseCooldown > 0) {
+        this.player.phaseCooldown -= deltaTime;
+    }
 
     // Activate Phase
-    if (input.phase && this.player.phaseCooldown <= 0) {
+    const phasePressed = input.phase && !this.lastPhaseInput;
+    this.lastPhaseInput = !!input.phase;
+
+    if (phasePressed && this.player.phaseCooldown <= 0) {
         this.player.phaseActive = true;
-        this.player.phaseTimeRemaining = 5000; // 5 seconds
-        this.player.phaseCooldown = 20000; // 20 seconds cooldown
+        this.player.phaseTimeRemaining = 5000; // 5 seconds duration
+        this.player.phaseCooldown = 10000; // 5s duration + 5s cooldown
         // Visual cue for activation
         this.spawnParticles(this.player.position, '#00FFFF', 20, 1.5);
     }
@@ -182,11 +186,10 @@ export class GameEngine {
             this.player.isJumping = true;
             this.player.jumpCount = 1;
             audioService.playJump();
-        } else if (this.player.jumpCount < 2 && this.player.doubleJumpCooldown <= 0) {
-            // Double Jump (Only if cooldown is 0)
+        } else if (this.player.jumpCount < 2) {
+            // Double Jump (Always available if count < 2)
             this.player.velocity.y = JUMP_FORCE * 0.9;
             this.player.jumpCount = 2;
-            this.player.doubleJumpCooldown = 20000; // 20 seconds cooldown
             audioService.playJump();
             // Visual feedback: puff
             this.spawnParticles(this.player.position, '#FFFFFF', 8, 0.5);
