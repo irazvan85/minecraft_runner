@@ -1,3 +1,4 @@
+
 export enum BlockType {
   GRASS = 'GRASS',
   DIRT = 'DIRT',
@@ -41,6 +42,17 @@ export interface Particle {
   size: number;
 }
 
+export interface RemotePlayer {
+  id: string;
+  name: string;
+  position: Point3D;
+  velocity: Point3D;
+  isJumping: boolean;
+  jumpCount: number;
+  colors: { shirt: string; pants: string };
+  speed: number;
+}
+
 export interface GameState {
   isPlaying: boolean;
   score: number;
@@ -54,6 +66,8 @@ export interface GameState {
   goldCollected: number;
   levelTarget: number;
   shakeIntensity: number;
+  isMultiplayer: boolean;
+  otherPlayers: RemotePlayer[];
 }
 
 export interface PlayerState {

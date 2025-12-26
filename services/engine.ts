@@ -1,4 +1,4 @@
-import { BlockType, Difficulty, Entity, Particle, PlayerState, Point3D } from '../types';
+import { BlockType, Difficulty, Entity, Particle, PlayerState, Point3D, RemotePlayer } from '../types';
 import { 
   GRAVITY, 
   JUMP_FORCE, 
@@ -41,12 +41,17 @@ export class GameEngine {
   private lastJumpInput = false;
   private lastPhaseInput = false;
 
+  // Multiplayer
+  private isMultiplayer = false;
+  private bots: RemotePlayer[] = [];
+
   constructor() {
-    this.reset(Difficulty.MEDIUM);
+    this.reset(Difficulty.MEDIUM, false);
   }
 
-  reset(difficulty: Difficulty) {
+  reset(difficulty: Difficulty, isMultiplayer: boolean = false) {
     this.difficulty = difficulty;
+    this.isMultiplayer = isMultiplayer;
     const settings = DIFFICULTY_SETTINGS[difficulty];
 
     this.player = {
@@ -72,6 +77,29 @@ export class GameEngine {
     this.shakeIntensity = 0;
     this.lastJumpInput = false;
     this.lastPhaseInput = false;
+    
+    // Initialize Bots for Multiplayer
+    this.bots = [];
+    if (this.isMultiplayer) {
+        const colors = [
+            { shirt: '#FF0000', pants: '#0000FF' }, // Red/Blue
+            { shirt: '#00FF00', pants: '#800080' }, // Green/Purple
+            { shirt: '#FFFF00', pants: '#000000' }, // Yellow/Black
+            { shirt: '#FFA500', pants: '#555555' }, // Orange/Gray
+        ];
+        for(let i=0; i<4; i++) {
+            this.bots.push({
+                id: `bot_${i}`,
+                name: `Player ${i+2}`,
+                position: { x: (Math.random() * 2 - 1) * LANE_WIDTH, y: 0, z: 0 },
+                velocity: { x: 0, y: 0, z: 0 },
+                isJumping: false,
+                jumpCount: 0,
+                colors: colors[i],
+                speed: settings.startSpeed
+            });
+        }
+    }
     
     // Initial ground generation
     for (let z = 0; z < 25; z++) {
@@ -207,6 +235,11 @@ export class GameEngine {
       this.player.jumpCount = 0; // Reset jumps
     }
 
+    // 4.5 Update Bots
+    if (this.isMultiplayer) {
+        this.updateBots();
+    }
+
     // 5. World Generation
     const renderDistance = 25;
     if (this.player.position.z + renderDistance > this.lastGenZ) {
@@ -222,6 +255,52 @@ export class GameEngine {
 
     // 7. Update Particles
     this.updateParticles();
+  }
+
+  private updateBots() {
+      const settings = DIFFICULTY_SETTINGS[this.difficulty];
+      
+      this.bots.forEach(bot => {
+          // AI: Rubber Banding Speed
+          // If bot is behind player, speed up. If ahead, slow down.
+          const distDiff = this.player.position.z - bot.position.z;
+          let desiredSpeed = this.currentSpeed;
+          
+          if (distDiff > 10) desiredSpeed *= 1.1; // Catch up fast
+          else if (distDiff > 0) desiredSpeed *= 1.02; // Catch up slow
+          else if (distDiff < -10) desiredSpeed *= 0.9; // Wait up
+          else desiredSpeed *= 0.98 + (Math.random() * 0.04); // Random fluctuation
+
+          bot.speed += (desiredSpeed - bot.speed) * 0.1;
+          bot.position.z += bot.speed;
+
+          // AI: Obstacle Avoidance (Jump)
+          // Look ahead in current X lane
+          const lookAheadDist = 6;
+          const imminentObstacle = this.entities.find(e => {
+              if (e.collected || e.type === BlockType.GOLD) return false;
+              const zDiff = e.position.z - bot.position.z;
+              const xDiff = Math.abs(e.position.x - bot.position.x);
+              return zDiff > 0 && zDiff < lookAheadDist && xDiff < 0.8;
+          });
+
+          if (imminentObstacle && !bot.isJumping) {
+               // Jump random timing
+               if (Math.random() > 0.1) {
+                   bot.velocity.y = JUMP_FORCE;
+                   bot.isJumping = true;
+               }
+          }
+
+          // Physics
+          bot.velocity.y -= GRAVITY;
+          bot.position.y += bot.velocity.y;
+          if (bot.position.y <= 0) {
+              bot.position.y = 0;
+              bot.velocity.y = 0;
+              bot.isJumping = false;
+          }
+      });
   }
 
   private generateSlice(z: number) {
@@ -398,7 +477,9 @@ export class GameEngine {
       gameWon: this.gameWon,
       goldCollected: this.goldCollectedInLevel,
       levelTarget: this.levelTarget,
-      shakeIntensity: this.shakeIntensity
+      shakeIntensity: this.shakeIntensity,
+      isMultiplayer: this.isMultiplayer,
+      otherPlayers: this.bots
     };
   }
 }

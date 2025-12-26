@@ -37,13 +37,11 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     return `rgb(${r},${g},${b})`;
   }, []);
 
-  const project = useCallback((p: Point3D, camX: number, camY: number, camZ: number, width: number, height: number, tilt: number) => {
+  const project = useCallback((p: Point3D, camX: number, camY: number, camZ: number, width: number, height: number, tilt: number, pitch: number) => {
     // 1. Translate
     let rx = p.x - camX;
     let ry = p.y - camY;
-    const rz = p.z - camZ;
-
-    if (rz <= 0.1) return null;
+    let rz = p.z - camZ;
 
     // 2. Rotate (Tilt - Z roll)
     if (tilt !== 0) {
@@ -55,7 +53,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
         ry = ny;
     }
 
-    // 3. Project
+    // 3. Rotate (Pitch - X axis)
+    if (pitch !== 0) {
+        const cos = Math.cos(pitch);
+        const sin = Math.sin(pitch);
+        const ny = ry * cos + rz * sin;
+        const nz = -ry * sin + rz * cos;
+        ry = ny;
+        rz = nz;
+    }
+
+    if (rz <= 0.1) return null;
+
+    // 4. Project
     const scale = FOV / rz;
     const x2d = (rx * scale) + (width / 2);
     const y2d = (height / 2) - (ry * scale);
@@ -84,7 +94,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
       size: { w: number, h: number, d: number },
       colors: { front: string, back: string, top: string, bottom: string, left: string, right: string },
       rotation: { x: number, y: number, z: number },
-      camX: number, camY: number, camZ: number, tilt: number,
+      partType: 'HEAD' | 'TORSO' | 'ARM' | 'LEG',
+      camX: number, camY: number, camZ: number, tilt: number, pitch: number,
       width: number, height: number,
       phaseActive: boolean
   ) => {
@@ -104,7 +115,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
           let y1 = v.y * Math.cos(rotation.x) - v.z * Math.sin(rotation.x);
           let z1 = v.y * Math.sin(rotation.x) + v.z * Math.cos(rotation.x);
           
-          // Z Rotation (Roll) - not used much here but good for completeness
+          // Z Rotation (Roll)
           let x2 = v.x * Math.cos(rotation.z) - y1 * Math.sin(rotation.z);
           let y2 = v.x * Math.sin(rotation.z) + y1 * Math.cos(rotation.z);
 
@@ -117,18 +128,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
       });
 
       // Project
-      const projVerts = worldVerts.map(v => project(v, camX, camY, camZ, width, height, tilt));
+      const projVerts = worldVerts.map(v => project(v, camX, camY, camZ, width, height, tilt, pitch));
 
       // Calculate Center Dist for Fog
       const dist = Math.sqrt(Math.pow(p.x - camX, 2) + Math.pow(p.y - camY, 2) + Math.pow(p.z - camZ, 2));
       
       if (phaseActive) ctx.globalAlpha = 0.6;
 
-      // Draw Faces (Painter's algorithm per part isn't perfect but sufficient for convex separate parts)
-      // We rely on face normal culling implicitly by checking projection order or just drawing typical visible faces?
-      // Since we are behind, we see Back, Top/Bottom, Left/Right.
-      // We rarely see front.
-      
       const drawFace = (idxs: number[], color: string, normal: 'FRONT' | 'BACK' | 'TOP' | 'BOTTOM' | 'LEFT' | 'RIGHT') => {
           if (idxs.some(i => !projVerts[i])) return;
           const ps = idxs.map(i => projVerts[i]!);
@@ -138,19 +144,55 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
           const v2 = { x: ps[2].x - ps[1].x, y: ps[2].y - ps[1].y };
           const cross = v1.x * v2.y - v1.y * v2.x;
           
-          if (cross > 0) return; // Backface culling in 2D space (assuming CCW winding)
+          if (cross > 0) return; // Backface culling in 2D space
           
           drawQuad(ctx, ps[0], ps[1], ps[2], ps[3], applyFog(color, dist));
+
+          // --- DETAILS ---
+          const mapUV = (u: number, v: number) => {
+            const topX = lerp(ps[0].x, ps[1].x, u); const topY = lerp(ps[0].y, ps[1].y, u);
+            const botX = lerp(ps[3].x, ps[2].x, u); const botY = lerp(ps[3].y, ps[2].y, u);
+            return { x: lerp(topX, botX, v), y: lerp(topY, botY, v) };
+          }
+          const drawRect = (u: number, v: number, w: number, h: number, c: string) => {
+             const tl = mapUV(u, v);
+             const tr = mapUV(u+w, v);
+             const br = mapUV(u+w, v+h);
+             const bl = mapUV(u, v+h);
+             drawQuad(ctx, tl, tr, br, bl, applyFog(c, dist));
+          }
+
+          // FACE
+          if (partType === 'HEAD' && normal === 'FRONT') {
+             // Hair
+             drawRect(0, 0, 1, 0.25, '#2A1D13');
+             // Eyes
+             drawRect(0.125, 0.5, 0.125, 0.125, '#FFFFFF'); // L Sclera
+             drawRect(0.25, 0.5, 0.125, 0.125, '#493C7B'); // L Pupil
+             drawRect(0.625, 0.5, 0.125, 0.125, '#FFFFFF'); // R Sclera
+             drawRect(0.75, 0.5, 0.125, 0.125, '#493C7B'); // R Pupil
+             // Nose
+             drawRect(0.4375, 0.625, 0.125, 0.0625, '#A57356');
+             // Mouth/Beard
+             drawRect(0.375, 0.75, 0.25, 0.125, '#784732');
+          }
+          // SIDE HAIR
+          if (partType === 'HEAD' && (normal === 'LEFT' || normal === 'RIGHT' || normal === 'BACK')) {
+              drawRect(0, 0, 1, 0.25, '#2A1D13');
+          }
+          
+          // SLEEVES
+          if (partType === 'ARM' && normal !== 'TOP' && normal !== 'BOTTOM') {
+              drawRect(0, 0, 1, 0.35, colors.front); // Use shirt color
+          }
+
+          // SHOES
+          if (partType === 'LEG' && normal !== 'TOP' && normal !== 'BOTTOM') {
+              drawRect(0, 0.85, 1, 0.15, '#555555');
+          }
       };
 
       // Indices for CCW winding
-      // Front: 0,1,2,3
-      // Back: 5,4,7,6
-      // Top: 4,5,1,0
-      // Bottom: 3,2,6,7
-      // Left: 4,0,3,7
-      // Right: 1,5,6,2
-
       drawFace([0,1,2,3], colors.front, 'FRONT');
       drawFace([5,4,7,6], colors.back, 'BACK');
       drawFace([4,5,1,0], colors.top, 'TOP');
@@ -164,52 +206,69 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
   const drawSteve = (
       ctx: CanvasRenderingContext2D,
       pos: Point3D,
-      camX: number, camY: number, camZ: number, tilt: number,
+      camX: number, camY: number, camZ: number, tilt: number, pitch: number,
       width: number, height: number,
       phaseActive: boolean,
       time: number,
-      isJumping: boolean
+      isJumping: boolean,
+      customColors: { shirt: string, pants: string } = { shirt: '#00AAAA', pants: '#3B3696' }
   ) => {
-      // Animation state
-      const runAnim = isJumping ? 0.5 : Math.sin(time * 0.015) * 1.2;
+      // Animation Config
+      const runFreq = 0.0175; 
+      const runAmp = 1.2; 
+
+      const animPhase = time * runFreq;
+      const rawSwing = Math.sin(animPhase);
       
-      const skinColor = '#F3C09A';
-      const shirtColor = '#00AAAA'; // Cyan
-      const pantsColor = '#303090'; // Indigo
-      const shoesColor = '#111111';
+      // Minecraft-style: Continue running animation in mid-air (Sprint Jumping)
+      const swing = rawSwing * runAmp; 
+
+      // Smoother bobbing (Only on ground)
+      const bob = isJumping ? 0 : Math.abs(Math.sin(animPhase)) * 0.1;
       
-      // -- LEGS --
-      // Dimensions: 0.25 x 0.75 x 0.25 approx
-      // Position relative to player center (x, 0, z)
-      // Player pos is ground level? No, player pos usually centroid or feet. Engine says feet y=0.
+      const steveY = pos.y + bob;
+
+      // Steve Colors
+      const skinColor = '#E3A581'; // Lighter, rosier skin
+      const shirtColor = customColors.shirt;
+      const pantsColor = customColors.pants;
+      const hairColor = '#2A1D13'; // Dark Brown
       
+      // Dimensions
       const legW = 0.22; const legH = 0.7; const legD = 0.22;
       const torsoW = 0.5; const torsoH = 0.65; const torsoD = 0.25;
       const headS = 0.45;
       const armW = 0.2; const armH = 0.7; const armD = 0.22;
 
-      const hipY = pos.y + legH;
+      const hipY = steveY + legH;
       const shoulderY = hipY + torsoH;
       const neckY = shoulderY;
+
+      const leftLegRot = -swing; 
+      const rightLegRot = swing;
+      const leftArmRot = swing; 
+      const rightArmRot = -swing; 
 
       // Left Leg
       drawStevePart(
           ctx, 
-          { x: pos.x - 0.13, y: pos.y + legH/2, z: pos.z }, 
+          { x: pos.x - 0.13, y: steveY + legH/2, z: pos.z }, 
           { w: legW, h: legH, d: legD }, 
-          { front: pantsColor, back: pantsColor, top: pantsColor, bottom: shoesColor, left: pantsColor, right: pantsColor },
-          { x: -runAnim * 0.5, y: 0, z: 0 },
-          camX, camY, camZ, tilt, width, height, phaseActive
+          { front: pantsColor, back: pantsColor, top: pantsColor, bottom: pantsColor, left: pantsColor, right: pantsColor },
+          { x: leftLegRot, y: 0, z: 0 },
+          'LEG',
+          camX, camY, camZ, tilt, pitch, width, height, phaseActive
       );
       
       // Right Leg
       drawStevePart(
           ctx, 
-          { x: pos.x + 0.13, y: pos.y + legH/2, z: pos.z }, 
+          { x: pos.x + 0.13, y: steveY + legH/2, z: pos.z }, 
           { w: legW, h: legH, d: legD }, 
-          { front: pantsColor, back: pantsColor, top: pantsColor, bottom: shoesColor, left: pantsColor, right: pantsColor },
-          { x: runAnim * 0.5, y: 0, z: 0 },
-          camX, camY, camZ, tilt, width, height, phaseActive
+          { front: pantsColor, back: pantsColor, top: pantsColor, bottom: pantsColor, left: pantsColor, right: pantsColor },
+          { x: rightLegRot, y: 0, z: 0 },
+          'LEG',
+          camX, camY, camZ, tilt, pitch, width, height, phaseActive
       );
 
       // Torso
@@ -219,7 +278,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
           { w: torsoW, h: torsoH, d: torsoD }, 
           { front: shirtColor, back: shirtColor, top: shirtColor, bottom: shirtColor, left: shirtColor, right: shirtColor },
           { x: 0, y: 0, z: 0 },
-          camX, camY, camZ, tilt, width, height, phaseActive
+          'TORSO',
+          camX, camY, camZ, tilt, pitch, width, height, phaseActive
       );
 
       // Head
@@ -227,9 +287,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
           ctx, 
           { x: pos.x, y: neckY + headS/2, z: pos.z }, 
           { w: headS, h: headS, d: headS }, 
-          { front: skinColor, back: '#3B2618', top: '#3B2618', bottom: skinColor, left: skinColor, right: skinColor },
-          { x: 0, y: 0, z: 0 }, // Maybe look up/down?
-          camX, camY, camZ, tilt, width, height, phaseActive
+          { front: skinColor, back: hairColor, top: hairColor, bottom: skinColor, left: skinColor, right: skinColor },
+          { x: 0, y: 0, z: 0 },
+          'HEAD',
+          camX, camY, camZ, tilt, pitch, width, height, phaseActive
       );
 
       // Left Arm
@@ -238,8 +299,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
           { x: pos.x - 0.36, y: shoulderY - armH/2 + 0.1, z: pos.z }, 
           { w: armW, h: armH, d: armD }, 
           { front: skinColor, back: skinColor, top: shirtColor, bottom: skinColor, left: skinColor, right: skinColor },
-          { x: runAnim * 0.5, y: 0, z: 0 },
-          camX, camY, camZ, tilt, width, height, phaseActive
+          { x: leftArmRot, y: 0, z: 0 },
+          'ARM',
+          camX, camY, camZ, tilt, pitch, width, height, phaseActive
       );
 
       // Right Arm
@@ -248,8 +310,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
           { x: pos.x + 0.36, y: shoulderY - armH/2 + 0.1, z: pos.z }, 
           { w: armW, h: armH, d: armD }, 
           { front: skinColor, back: skinColor, top: shirtColor, bottom: skinColor, left: skinColor, right: skinColor },
-          { x: -runAnim * 0.5, y: 0, z: 0 },
-          camX, camY, camZ, tilt, width, height, phaseActive
+          { x: rightArmRot, y: 0, z: 0 },
+          'ARM',
+          camX, camY, camZ, tilt, pitch, width, height, phaseActive
       );
   }
 
@@ -418,7 +481,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
   const drawCube = useCallback((
     ctx: CanvasRenderingContext2D, 
     entity: Entity, 
-    camX: number, camY: number, camZ: number, tilt: number,
+    camX: number, camY: number, camZ: number, tilt: number, pitch: number,
     width: number, height: number,
     phaseActive: boolean
   ) => {
@@ -427,7 +490,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     const hs = entity.size / 2;
     const { x, y, z } = entity.position;
 
-    const projC = project({x, y, z}, camX, camY, camZ, width, height, tilt);
+    const projC = project({x, y, z}, camX, camY, camZ, width, height, tilt, pitch);
     if (!projC) return;
     
     const dist = projC.dist;
@@ -446,39 +509,18 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     };
 
     const p = {
-        ft: project(v.ft, camX, camY, camZ, width, height, tilt),
-        ftr: project(v.ftr, camX, camY, camZ, width, height, tilt),
-        fb: project(v.fb, camX, camY, camZ, width, height, tilt),
-        fbr: project(v.fbr, camX, camY, camZ, width, height, tilt),
-        bt: project(v.bt, camX, camY, camZ, width, height, tilt),
-        btr: project(v.btr, camX, camY, camZ, width, height, tilt),
-        bb: project(v.bb, camX, camY, camZ, width, height, tilt),
-        bbr: project(v.bbr, camX, camY, camZ, width, height, tilt),
+        ft: project(v.ft, camX, camY, camZ, width, height, tilt, pitch),
+        ftr: project(v.ftr, camX, camY, camZ, width, height, tilt, pitch),
+        fb: project(v.fb, camX, camY, camZ, width, height, tilt, pitch),
+        fbr: project(v.fbr, camX, camY, camZ, width, height, tilt, pitch),
+        bt: project(v.bt, camX, camY, camZ, width, height, tilt, pitch),
+        btr: project(v.btr, camX, camY, camZ, width, height, tilt, pitch),
+        bb: project(v.bb, camX, camY, camZ, width, height, tilt, pitch),
+        bbr: project(v.bbr, camX, camY, camZ, width, height, tilt, pitch),
     };
 
     if (!p.ft || !p.ftr || !p.fb || !p.fbr || !p.bt || !p.btr) return;
 
-    // Draw faces back to front? 
-    // Simplified logic: If Z of face center is > Z of entity center...
-    // But since we are looking down +Z mainly, we see Front, Top, and Side.
-    // Wait, TPV camera is at Z - 4. Entity is at Z. We see Back face?
-    // Camera is at PlayerZ - 4. World is +Z. 
-    // So we look at the Back of the entity if it is ahead of us.
-    // The existing drawCube was optimized for FPV looking forward (seeing Back? No, seeing Front/Side/Top of block in front).
-    
-    // Correction:
-    // If Entity Z > Camera Z (Entity is in front), we see its "Back" face (the face with lower Z)?
-    // Standard coordinates:
-    // +Z is into screen.
-    // Front face: Z - hs (Towards viewer if viewer is at -Z).
-    // Back face: Z + hs (Away from viewer).
-    // So if Camera is at Z-4, looking at Z, we see the face at Z-hs.
-    // The existing logic:
-    // `v.ft` is `z - hs`. This is the face CLOSEST to camera (if camera is -Z).
-    // So yes, `FRONT` is correct label for face at `z-hs`.
-    
-    // Logic:
-    // `z - hs > camZ + 0.1` -> The front face is in front of camera. Draw it.
     if (z - hs > camZ + 0.1) {
        drawFaceDetails(ctx, entity.type, 'FRONT', p.ft, p.ftr, p.fbr, p.fb, dist, phaseActive);
     }
@@ -494,7 +536,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     if (y < camY) {
          drawFaceDetails(ctx, entity.type, 'TOP', p.bt, p.btr, p.ftr, p.ft, dist, phaseActive);
     }
-    // We usually don't see bottom
   }, [project, applyFog]);
 
   const loop = useCallback((time: number) => {
@@ -546,14 +587,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // TPV Camera
+    // Camera Configuration (High-Angle / Top-Down view)
     const bob = Math.sin(time * 0.015) * 0.05 * (state.speed / 0.5);
     
-    // Camera trails behind player
-    let camX = state.player.position.x * 0.8; // Lag slightly on X for effect
-    let camY = state.player.position.y + 2.8 + bob; // Look from above
-    let camZ = state.player.position.z - 4.5; // Behind
+    // Increased Y height and angled pitch down for "from above" view
+    let camX = state.player.position.x * 0.8; 
+    let camY = state.player.position.y + 7.5 + bob; 
+    let camZ = state.player.position.z - 5.5; 
     const tilt = state.player.tilt;
+    const pitch = 0.6; // ~35 degrees looking down
 
     if (state.shakeIntensity > 0) {
        camX += (Math.random() - 0.5) * state.shakeIntensity;
@@ -563,26 +605,48 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
     // Sort Entities: Far to Near (Painter's Algorithm)
     const sortedEntities = [...state.entities].sort((a, b) => b.position.z - a.position.z);
     
-    let steveDrawn = false;
+    // Helper to check if item is behind camera
+    const isVisible = (z: number) => z > camZ + 0.5;
 
-    // Draw Loop
-    for (const entity of sortedEntities) {
-        // If we reach entities closer than player, draw player first
-        if (!steveDrawn && entity.position.z < state.player.position.z) {
-            drawSteve(ctx, state.player.position, camX, camY, camZ, tilt, width, height, state.player.phaseActive, time, state.player.isJumping);
-            steveDrawn = true;
-        }
-        drawCube(ctx, entity, camX, camY, camZ, tilt, width, height, state.player.phaseActive);
-    }
+    let steveDrawn = false;
     
-    // Fallback if player is closer than all entities
-    if (!steveDrawn) {
-         drawSteve(ctx, state.player.position, camX, camY, camZ, tilt, width, height, state.player.phaseActive, time, state.player.isJumping);
+    // Render Bots & Entities Mixed
+    const allDrawables = [
+        ...sortedEntities.map(e => ({ type: 'ENTITY', z: e.position.z, obj: e })),
+        { type: 'PLAYER', z: state.player.position.z, obj: state.player },
+        ...(state.isMultiplayer ? state.otherPlayers.map(p => ({ type: 'BOT', z: p.position.z, obj: p })) : [])
+    ].sort((a, b) => b.z - a.z); // Draw furthest first
+
+    for (const item of allDrawables) {
+        if (!isVisible(item.z)) continue;
+
+        if (item.type === 'ENTITY') {
+            const e = item.obj as Entity;
+            drawCube(ctx, e, camX, camY, camZ, tilt, pitch, width, height, state.player.phaseActive);
+        } else if (item.type === 'PLAYER') {
+            drawSteve(ctx, state.player.position, camX, camY, camZ, tilt, pitch, width, height, state.player.phaseActive, time, state.player.isJumping);
+        } else if (item.type === 'BOT') {
+            const bot = item.obj as any;
+            drawSteve(ctx, bot.position, camX, camY, camZ, tilt, pitch, width, height, false, time + parseInt(bot.id.split('_')[1])*500, bot.isJumping, bot.colors);
+            
+            // Draw Name Tag
+            const headPos = { x: bot.position.x, y: bot.position.y + 1.8, z: bot.position.z };
+            const p = project(headPos, camX, camY, camZ, width, height, tilt, pitch);
+            if (p) {
+                ctx.fillStyle = 'rgba(0,0,0,0.5)';
+                const textWidth = ctx.measureText(bot.name).width;
+                ctx.fillRect(p.x - 20, p.y - 15, 40, 15);
+                ctx.fillStyle = '#FFFFFF';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(bot.name, p.x, p.y - 4);
+            }
+        }
     }
 
     // Particles
     for (const p of state.particles) {
-        const proj = project(p.position, camX, camY, camZ, width, height, tilt);
+        const proj = project(p.position, camX, camY, camZ, width, height, tilt, pitch);
         if (proj) {
             ctx.fillStyle = p.color;
             ctx.globalAlpha = p.life;
@@ -592,7 +656,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ engine, onGameOver, inpu
         }
     }
 
-    // Speed Lines (Only if fast)
+    // Speed Lines
     if (state.speed > 0.6) {
       ctx.strokeStyle = state.player.phaseActive ? 'rgba(0, 255, 255, 0.2)' : 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 2;

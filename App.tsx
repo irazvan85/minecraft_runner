@@ -88,13 +88,13 @@ export default function App() {
     };
   }, [appState]);
 
-  const startGame = () => {
+  const startGame = (isMultiplayer: boolean = false) => {
     if (!playerName.trim()) {
         alert("Please enter your name!");
         return;
     }
     audioService.initialize();
-    engineRef.current.reset(selectedDifficulty);
+    engineRef.current.reset(selectedDifficulty, isMultiplayer);
     inputState.current = { left: false, right: false, jump: false, phase: false };
     setAppState(AppState.PLAYING);
   };
@@ -182,10 +182,16 @@ export default function App() {
 
           <div className="flex flex-col gap-4">
             <button 
-              onClick={startGame}
+              onClick={() => startGame(false)}
               className="px-8 py-4 bg-green-600 hover:bg-green-500 text-white text-2xl font-bold border-b-4 border-green-800 active:border-b-0 active:translate-y-1 transition-all rounded"
             >
               START RUN
+            </button>
+             <button 
+              onClick={() => startGame(true)}
+              className="px-8 py-4 bg-purple-600 hover:bg-purple-500 text-white text-xl font-bold border-b-4 border-purple-800 active:border-b-0 active:translate-y-1 transition-all rounded flex items-center justify-center gap-2"
+            >
+              MULTIPLAYER (5 Players)
             </button>
             <button 
               onClick={() => setAppState(AppState.HELP)}
@@ -282,7 +288,7 @@ export default function App() {
           
           <div className="flex gap-4 justify-center">
             <button 
-              onClick={startGame}
+              onClick={() => startGame(false)}
               className="px-8 py-4 bg-gray-100 hover:bg-white text-black text-xl font-bold border-b-4 border-gray-400 active:border-b-0 active:translate-y-1 transition-all rounded"
             >
               TRY AGAIN
