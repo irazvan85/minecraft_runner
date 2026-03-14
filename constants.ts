@@ -25,7 +25,7 @@ export const DIFFICULTY_SETTINGS = {
 
 // Visuals
 export const SKY_COLOR_HEX = '#87CEEB';
-export const FOG_DISTANCE = 25;
+export const FOG_DISTANCE = 60;
 
 // Helper to mix colors for Fog
 export const hexToRgb = (hex: string) => {

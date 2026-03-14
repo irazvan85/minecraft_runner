@@ -1,4 +1,4 @@
-import { BlockType, Difficulty, Entity, Particle, PlayerState, Point3D, RemotePlayer } from '../types';
+import { BlockType, Difficulty, Entity, Particle, PlayerState, Point3D } from '../types';
 import { 
   GRAVITY, 
   JUMP_FORCE, 
@@ -13,24 +13,23 @@ import {
 } from '../constants';
 import { audioService } from './audio';
 
+export interface InputMap {
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+  phase?: boolean;
+  forward?: boolean; // P2 W key
+}
+
 export class GameEngine {
   public entities: Entity[] = [];
   public particles: Particle[] = [];
-  public player: PlayerState = {
-    position: { x: 0, y: 0, z: 0 },
-    velocity: { x: 0, y: 0, z: 0 },
-    isJumping: false,
-    tilt: 0,
-    jumpCount: 0,
-    phaseActive: false,
-    phaseTimeRemaining: 0,
-    phaseCooldown: 0
-  };
+  
+  public player: PlayerState;
+  public player2?: PlayerState;
   
   private lastGenZ = 10;
   private currentSpeed = 0;
-  private score = 0;
-  private lives = 3;
   private level = 1;
   private difficulty: Difficulty = Difficulty.MEDIUM;
   private particleIdCounter = 0;
@@ -38,15 +37,36 @@ export class GameEngine {
   private levelTarget = BASE_LEVEL_TARGET;
   private gameWon = false;
   private shakeIntensity = 0;
-  private lastJumpInput = false;
-  private lastPhaseInput = false;
+  private score = 0;
+  
+  // Input tracking for edge detection
+  private lastJumpInputP1 = false;
+  private lastPhaseInputP1 = false;
+  private lastJumpInputP2 = false;
+  private lastPhaseInputP2 = false;
 
-  // Multiplayer
   private isMultiplayer = false;
-  private bots: RemotePlayer[] = [];
 
   constructor() {
+    this.player = this.createPlayer('p1', { shirt: '#00AAAA', pants: '#3B3696' });
     this.reset(Difficulty.MEDIUM, false);
+  }
+
+  private createPlayer(id: string, colors: { shirt: string, pants: string }): PlayerState {
+    return {
+      id,
+      position: { x: id === 'p2' ? 1.5 : -1.5, y: 0, z: 0 }, // Offset start positions
+      velocity: { x: 0, y: 0, z: 0 },
+      isJumping: false,
+      tilt: 0,
+      jumpCount: 0,
+      phaseActive: false,
+      phaseTimeRemaining: 0,
+      phaseCooldown: 0,
+      lives: 3,
+      score: 0,
+      colors
+    };
   }
 
   reset(difficulty: Difficulty, isMultiplayer: boolean = false) {
@@ -54,263 +74,178 @@ export class GameEngine {
     this.isMultiplayer = isMultiplayer;
     const settings = DIFFICULTY_SETTINGS[difficulty];
 
-    this.player = {
-      position: { x: 0, y: 0, z: 0 },
-      velocity: { x: 0, y: 0, z: 0 },
-      isJumping: false,
-      tilt: 0,
-      jumpCount: 0,
-      phaseActive: false,
-      phaseTimeRemaining: 0,
-      phaseCooldown: 0
-    };
+    this.player = this.createPlayer('p1', { shirt: '#00AAAA', pants: '#3B3696' }); // Teal/Blue
+    
+    if (this.isMultiplayer) {
+       this.player2 = this.createPlayer('p2', { shirt: '#FF5555', pants: '#222222' }); // Red/Black
+       // Start them side by side
+       this.player.position.x = -1.0;
+       this.player2.position.x = 1.0;
+    } else {
+       this.player2 = undefined;
+       this.player.position.x = 0;
+    }
+
     this.entities = [];
     this.particles = [];
     this.currentSpeed = settings.startSpeed;
-    this.lastGenZ = 5;
-    this.score = 0;
-    this.lives = 3;
     this.level = 1;
     this.goldCollectedInLevel = 0;
     this.levelTarget = BASE_LEVEL_TARGET;
     this.gameWon = false;
     this.shakeIntensity = 0;
-    this.lastJumpInput = false;
-    this.lastPhaseInput = false;
-    
-    // Initialize Bots for Multiplayer
-    this.bots = [];
-    if (this.isMultiplayer) {
-        const colors = [
-            { shirt: '#FF0000', pants: '#0000FF' }, // Red/Blue
-            { shirt: '#00FF00', pants: '#800080' }, // Green/Purple
-            { shirt: '#FFFF00', pants: '#000000' }, // Yellow/Black
-            { shirt: '#FFA500', pants: '#555555' }, // Orange/Gray
-        ];
-        for(let i=0; i<4; i++) {
-            this.bots.push({
-                id: `bot_${i}`,
-                name: `Player ${i+2}`,
-                position: { x: (Math.random() * 2 - 1) * LANE_WIDTH, y: 0, z: 0 },
-                velocity: { x: 0, y: 0, z: 0 },
-                isJumping: false,
-                jumpCount: 0,
-                colors: colors[i],
-                speed: settings.startSpeed
-            });
-        }
-    }
+    this.score = 0;
+    this.lastJumpInputP1 = false;
+    this.lastPhaseInputP1 = false;
+    this.lastJumpInputP2 = false;
+    this.lastPhaseInputP2 = false;
     
     // Initial ground generation
-    for (let z = 0; z < 25; z++) {
+    const initialDistance = 60;
+    this.lastGenZ = initialDistance;
+    for (let z = 0; z < initialDistance; z++) {
       this.generateSlice(z);
     }
   }
 
-  update(input: { left: boolean; right: boolean; jump: boolean; phase?: boolean }, deltaTime: number) {
+  update(inputP1: InputMap, inputP2: InputMap, deltaTime: number) {
     if (this.gameWon) return;
 
     // Decay Shake
     if (this.shakeIntensity > 0.001) {
-        this.shakeIntensity *= 0.85; // Decay factor
+        this.shakeIntensity *= 0.85; 
     } else {
         this.shakeIntensity = 0;
     }
 
-    // Update Abilities
-    if (this.player.phaseTimeRemaining > 0) {
-        this.player.phaseTimeRemaining -= deltaTime;
-        if (this.player.phaseTimeRemaining <= 0) this.player.phaseActive = false;
-    }
-    if (this.player.phaseCooldown > 0) {
-        this.player.phaseCooldown -= deltaTime;
-    }
-
-    // Activate Phase
-    const phasePressed = input.phase && !this.lastPhaseInput;
-    this.lastPhaseInput = !!input.phase;
-
-    if (phasePressed && this.player.phaseCooldown <= 0) {
-        this.player.phaseActive = true;
-        this.player.phaseTimeRemaining = 5000; // 5 seconds duration
-        this.player.phaseCooldown = 10000; // 5s duration + 5s cooldown
-        // Visual cue for activation
-        this.spawnParticles(this.player.position, '#00FFFF', 20, 1.5);
-    }
-
     const settings = DIFFICULTY_SETTINGS[this.difficulty];
 
-    // 1. Leveling Logic (Gold Based)
+    // Leveling Logic (Shared progress or P1 driven? Let's make it shared based on gold)
     if (this.goldCollectedInLevel >= this.levelTarget) {
         this.level++;
         this.goldCollectedInLevel = 0;
         this.levelTarget += LEVEL_TARGET_INCREMENT;
-        
-        // Boost speed slightly on level up ONLY if not Easy
         if (this.difficulty !== Difficulty.EASY) {
              this.currentSpeed = Math.min(this.currentSpeed + 0.05, settings.maxSpeed + 0.2); 
         }
     }
-    
-    // Calculate target speed
-    let targetSpeed = settings.startSpeed;
-    
-    if (this.difficulty !== Difficulty.EASY) {
-        // Increase speed with level for Medium/Hard
-        targetSpeed = Math.min(
-          settings.startSpeed + (this.level - 1) * 0.04, 
-          settings.maxSpeed
-        );
-    }
 
-    // Smooth acceleration to target speed
+    // Speed Calculation
+    let targetSpeed = settings.startSpeed;
+    if (this.difficulty !== Difficulty.EASY) {
+        targetSpeed = Math.min(settings.startSpeed + (this.level - 1) * 0.04, settings.maxSpeed);
+    }
     if (this.currentSpeed < targetSpeed) {
       this.currentSpeed += settings.accel;
     }
 
-    // 2. Move Player Forward
-    this.player.position.z += this.currentSpeed;
+    // Update Player 1
+    this.updatePlayerPhysics(this.player, inputP1, this.lastJumpInputP1, this.lastPhaseInputP1, deltaTime);
+    this.lastJumpInputP1 = inputP1.jump;
+    this.lastPhaseInputP1 = !!inputP1.phase;
 
-    // 3. Lateral Physics (Inertia-based)
-    if (input.left) {
-        this.player.velocity.x -= MOVE_ACCEL_X;
-    }
-    if (input.right) {
-        this.player.velocity.x += MOVE_ACCEL_X;
-    }
-    
-    // Apply Friction
-    this.player.velocity.x *= FRICTION_X;
-
-    // Clamp Velocity
-    if (this.player.velocity.x > MAX_SPEED_X) this.player.velocity.x = MAX_SPEED_X;
-    if (this.player.velocity.x < -MAX_SPEED_X) this.player.velocity.x = -MAX_SPEED_X;
-
-    // Apply Position
-    this.player.position.x += this.player.velocity.x;
-
-    // Tilt Effect
-    this.player.tilt = -this.player.velocity.x * CAMERA_TILT_FACTOR;
-
-    // Clamp X Position (Walls)
-    const MAX_X = LANE_WIDTH * 1.8;
-    if (this.player.position.x < -MAX_X) {
-        this.player.position.x = -MAX_X;
-        this.player.velocity.x = 0;
-    }
-    if (this.player.position.x > MAX_X) {
-        this.player.position.x = MAX_X;
-        this.player.velocity.x = 0;
+    // Update Player 2
+    if (this.isMultiplayer && this.player2) {
+        this.updatePlayerPhysics(this.player2, inputP2, this.lastJumpInputP2, this.lastPhaseInputP2, deltaTime);
+        this.lastJumpInputP2 = inputP2.jump;
+        this.lastPhaseInputP2 = !!inputP2.phase;
     }
 
-    // 4. Jump & Gravity (Double Jump Logic)
-    const jumpPressed = input.jump && !this.lastJumpInput;
-    this.lastJumpInput = input.jump;
-
-    if (jumpPressed) {
-        if (!this.player.isJumping) {
-            // First Jump
-            this.player.velocity.y = JUMP_FORCE;
-            this.player.isJumping = true;
-            this.player.jumpCount = 1;
-            audioService.playJump();
-        } else if (this.player.jumpCount < 2) {
-            // Double Jump (Always available if count < 2)
-            this.player.velocity.y = JUMP_FORCE * 0.9;
-            this.player.jumpCount = 2;
-            audioService.playJump();
-            // Visual feedback: puff
-            this.spawnParticles(this.player.position, '#FFFFFF', 8, 0.5);
-        }
-    }
-
-    this.player.velocity.y -= GRAVITY;
-    this.player.position.y += this.player.velocity.y;
-
-    // Ground Collision
-    if (this.player.position.y <= 0) {
-      this.player.position.y = 0;
-      this.player.velocity.y = 0;
-      this.player.isJumping = false;
-      this.player.jumpCount = 0; // Reset jumps
-    }
-
-    // 4.5 Update Bots
-    if (this.isMultiplayer) {
-        this.updateBots();
-    }
-
-    // 5. World Generation
-    const renderDistance = 25;
-    if (this.player.position.z + renderDistance > this.lastGenZ) {
+    // World Generation based on leading player
+    const leadZ = this.player2 ? Math.max(this.player.position.z, this.player2.position.z) : this.player.position.z;
+    const renderDistance = 60;
+    if (leadZ + renderDistance > this.lastGenZ) {
       this.generateSlice(this.lastGenZ);
       this.lastGenZ++;
     }
 
-    // Cleanup behind
-    this.entities = this.entities.filter(e => e.position.z > this.player.position.z - 5);
+    // Cleanup behind lagging player
+    const lagZ = this.player2 ? Math.min(this.player.position.z, this.player2.position.z) : this.player.position.z;
+    this.entities = this.entities.filter(e => e.position.z > lagZ - 5);
     
-    // 6. Collision Detection
-    this.checkCollisions();
+    // Check Collisions
+    this.checkCollisions(this.player);
+    if (this.isMultiplayer && this.player2) {
+        this.checkCollisions(this.player2);
+    }
 
-    // 7. Update Particles
+    // Update Particles
     this.updateParticles();
   }
 
-  private updateBots() {
-      const settings = DIFFICULTY_SETTINGS[this.difficulty];
+  private updatePlayerPhysics(p: PlayerState, input: InputMap, lastJump: boolean, lastPhase: boolean, deltaTime: number) {
+      if (p.lives <= 0) return; // Dead players don't move
+
+      // Abilities
+      if (p.phaseTimeRemaining > 0) {
+          p.phaseTimeRemaining -= deltaTime;
+          if (p.phaseTimeRemaining <= 0) p.phaseActive = false;
+      }
+      if (p.phaseCooldown > 0) p.phaseCooldown -= deltaTime;
+
+      const phasePressed = input.phase && !lastPhase;
+      if (phasePressed && p.phaseCooldown <= 0) {
+          p.phaseActive = true;
+          p.phaseTimeRemaining = 5000;
+          p.phaseCooldown = 10000;
+          this.spawnParticles(p.position, '#00FFFF', 20, 1.5);
+      }
+
+      // Forward Movement
+      p.position.z += this.currentSpeed;
       
-      this.bots.forEach(bot => {
-          // AI: Rubber Banding Speed
-          // If bot is behind player, speed up. If ahead, slow down.
-          const distDiff = this.player.position.z - bot.position.z;
-          let desiredSpeed = this.currentSpeed;
-          
-          if (distDiff > 10) desiredSpeed *= 1.1; // Catch up fast
-          else if (distDiff > 0) desiredSpeed *= 1.02; // Catch up slow
-          else if (distDiff < -10) desiredSpeed *= 0.9; // Wait up
-          else desiredSpeed *= 0.98 + (Math.random() * 0.04); // Random fluctuation
+      // Lateral Movement
+      if (input.left) p.velocity.x -= MOVE_ACCEL_X;
+      if (input.right) p.velocity.x += MOVE_ACCEL_X;
+      p.velocity.x *= FRICTION_X;
+      
+      if (p.velocity.x > MAX_SPEED_X) p.velocity.x = MAX_SPEED_X;
+      if (p.velocity.x < -MAX_SPEED_X) p.velocity.x = -MAX_SPEED_X;
 
-          bot.speed += (desiredSpeed - bot.speed) * 0.1;
-          bot.position.z += bot.speed;
+      p.position.x += p.velocity.x;
+      p.tilt = -p.velocity.x * CAMERA_TILT_FACTOR;
 
-          // AI: Obstacle Avoidance (Jump)
-          // Look ahead in current X lane
-          const lookAheadDist = 6;
-          const imminentObstacle = this.entities.find(e => {
-              if (e.collected || e.type === BlockType.GOLD) return false;
-              const zDiff = e.position.z - bot.position.z;
-              const xDiff = Math.abs(e.position.x - bot.position.x);
-              return zDiff > 0 && zDiff < lookAheadDist && xDiff < 0.8;
-          });
+      // Walls
+      const MAX_X = LANE_WIDTH * 1.8;
+      if (p.position.x < -MAX_X) { p.position.x = -MAX_X; p.velocity.x = 0; }
+      if (p.position.x > MAX_X) { p.position.x = MAX_X; p.velocity.x = 0; }
 
-          if (imminentObstacle && !bot.isJumping) {
-               // Jump random timing
-               if (Math.random() > 0.1) {
-                   bot.velocity.y = JUMP_FORCE;
-                   bot.isJumping = true;
-               }
+      // Jump (Triple and Quadruple Jump support)
+      const jumpPressed = input.jump && !lastJump;
+      if (jumpPressed) {
+          if (!p.isJumping) {
+              p.velocity.y = JUMP_FORCE;
+              p.isJumping = true;
+              p.jumpCount = 1;
+              audioService.playJump();
+          } else if (p.jumpCount < 4) { // Increased from 2 to 4 for Quadruple Jump
+              // Each successive jump is slightly weaker but still significant
+              p.velocity.y = JUMP_FORCE * (0.9 - (p.jumpCount * 0.05));
+              p.jumpCount++;
+              audioService.playJump();
+              this.spawnParticles(p.position, '#FFFFFF', 8, 0.5);
           }
+      }
 
-          // Physics
-          bot.velocity.y -= GRAVITY;
-          bot.position.y += bot.velocity.y;
-          if (bot.position.y <= 0) {
-              bot.position.y = 0;
-              bot.velocity.y = 0;
-              bot.isJumping = false;
-          }
-      });
+      // Gravity
+      p.velocity.y -= GRAVITY;
+      p.position.y += p.velocity.y;
+
+      if (p.position.y <= 0) {
+          p.position.y = 0;
+          p.velocity.y = 0;
+          p.isJumping = false;
+          p.jumpCount = 0;
+      }
   }
 
   private generateSlice(z: number) {
     const settings = DIFFICULTY_SETTINGS[this.difficulty];
-
     // Always ground
     for (let x = -2; x <= 2; x++) {
        this.entities.push({
          id: `ground_${z}_${x}`,
-         type: (x + z) % 2 === 0 ? BlockType.GRASS : BlockType.GRASS,
+         type: BlockType.GRASS,
          position: { x: x * LANE_WIDTH, y: -1, z },
          size: 1
        });
@@ -320,18 +255,14 @@ export class GameEngine {
       const lane = Math.floor(Math.random() * 3) - 1; 
       const xPos = lane * LANE_WIDTH;
       const rand = Math.random();
-
-      // Difficulty-based spawn rate
       const obstacleChance = Math.min(settings.obstacleChance + (this.level * 0.01), 0.4);
 
       if (rand < obstacleChance) {
-        // Obstacle Selection based on Level
         let availableObstacles = [BlockType.STONE, BlockType.TNT];
         if (this.level >= 2) availableObstacles.push(BlockType.CREEPER);
         if (this.level >= 3) availableObstacles.push(BlockType.SKELETON);
 
         const type = availableObstacles[Math.floor(Math.random() * availableObstacles.length)];
-
         this.entities.push({
           id: `obs_${z}`,
           type,
@@ -339,7 +270,6 @@ export class GameEngine {
           size: 1
         });
         
-        // Stack logic (less likely for mobs)
         if (Math.random() > 0.7 && type !== BlockType.CREEPER && type !== BlockType.SKELETON) {
            this.entities.push({
             id: `obs_stack_${z}`,
@@ -349,7 +279,6 @@ export class GameEngine {
           });
         }
       } else if (rand > 0.5 && rand < 0.8) { 
-        // Higher chance for gold to help players progress
         this.entities.push({
           id: `gold_${z}`,
           type: BlockType.GOLD,
@@ -361,14 +290,14 @@ export class GameEngine {
     }
   }
 
-  private checkCollisions() {
+  private checkCollisions(p: PlayerState) {
+    if (p.lives <= 0) return;
+
     const playerBox = {
-      x: this.player.position.x,
-      y: this.player.position.y,
-      z: this.player.position.z,
-      w: 0.6,
-      h: 0.9,
-      d: 0.6
+      x: p.position.x,
+      y: p.position.y,
+      z: p.position.z,
+      w: 0.6, h: 0.9, d: 0.6
     };
 
     for (const entity of this.entities) {
@@ -383,50 +312,40 @@ export class GameEngine {
       const minDistZ = (playerBox.d + entity.size) / 2;
 
       if (dx < minDistX && dy < minDistY && dz < minDistZ) {
-        this.handleCollision(entity);
+        this.handleCollision(p, entity);
       }
     }
   }
 
-  private handleCollision(entity: Entity) {
+  private handleCollision(p: PlayerState, entity: Entity) {
     if (entity.type === BlockType.GOLD) {
       entity.collected = true;
-      this.score += 10;
+      p.score += 10;
+      this.score += 10; 
       this.goldCollectedInLevel++;
       this.spawnParticles(entity.position, '#FCEE4B', 10);
       audioService.playCollect();
-      
-      // WIN CONDITION
-      if (this.score >= 250) {
-        this.gameWon = true;
-      }
+      if (this.score >= 250) this.gameWon = true;
 
     } else {
       // Obstacle Hit
-      if (this.player.phaseActive) return; // IGNORE OBSTACLE COLLISIONS IF PHASED
+      if (p.phaseActive) return;
 
-      if (!entity.collected) { // Prevent double hits per frame
-          this.lives -= 1;
-          entity.collected = true;
+      if (!entity.collected) { 
+          p.lives -= 1;
+          entity.collected = true; 
           
           if (entity.type === BlockType.TNT) {
-              // TNT EXPLOSION
-              this.shakeIntensity = 0.5; // High shake amplitude
-              
-              // Multiple colored bursts for explosion
-              this.spawnParticles(entity.position, '#DB3625', 20, 2.0); // Red core
-              this.spawnParticles(entity.position, '#FF8C00', 20, 1.8); // Orange mid
-              this.spawnParticles(entity.position, '#FFFF00', 15, 1.5); // Yellow outer
-              this.spawnParticles(entity.position, '#FFFFFF', 10, 2.5); // White sparks
+              this.shakeIntensity = 0.5;
+              this.spawnParticles(entity.position, '#DB3625', 20, 2.0); 
+              this.spawnParticles(entity.position, '#FF8C00', 20, 1.8);
+              this.spawnParticles(entity.position, '#FFFF00', 15, 1.5);
           } else {
-              // Standard obstacle particles
               let color = '#7D7D7D';
               if (entity.type === BlockType.CREEPER) color = '#0DA70D';
               if (entity.type === BlockType.SKELETON) color = '#E3E3E3';
-              
               this.spawnParticles(entity.position, color, 20);
           }
-          
           audioService.playHit();
       }
     }
@@ -450,36 +369,39 @@ export class GameEngine {
   }
 
   private updateParticles() {
-      // Move particles
       for (const p of this.particles) {
           p.position.x += p.velocity.x;
           p.position.y += p.velocity.y;
           p.position.z += p.velocity.z;
-          p.velocity.y -= 0.02; // Gravity for particles
+          p.velocity.y -= 0.02; 
           p.life -= 0.05;
       }
-      // Remove dead particles
       this.particles = this.particles.filter(p => p.life > 0);
   }
 
   public getState() {
+    const p1Dead = this.player.lives <= 0;
+    const p2Dead = this.isMultiplayer && this.player2 ? this.player2.lives <= 0 : true;
+    const allDead = this.isMultiplayer ? (p1Dead && p2Dead) : p1Dead;
+
     return {
       entities: this.entities,
       particles: this.particles,
       player: this.player,
-      score: this.score,
-      lives: this.lives,
+      player2: this.player2,
+      score: this.score, 
+      lives: this.player.lives,
       speed: this.currentSpeed,
       level: this.level,
       distance: this.player.position.z,
-      isPlaying: this.lives > 0 && !this.gameWon,
-      gameOver: this.lives <= 0,
+      isPlaying: !allDead && !this.gameWon,
+      gameOver: allDead,
       gameWon: this.gameWon,
       goldCollected: this.goldCollectedInLevel,
       levelTarget: this.levelTarget,
       shakeIntensity: this.shakeIntensity,
       isMultiplayer: this.isMultiplayer,
-      otherPlayers: this.bots
+      otherPlayers: [] 
     };
   }
 }

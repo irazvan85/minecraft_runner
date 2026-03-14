@@ -53,24 +53,8 @@ export interface RemotePlayer {
   speed: number;
 }
 
-export interface GameState {
-  isPlaying: boolean;
-  score: number;
-  distance: number;
-  speed: number;
-  lives: number;
-  gameOver: boolean;
-  gameWon: boolean;
-  level: number;
-  particles: Particle[];
-  goldCollected: number;
-  levelTarget: number;
-  shakeIntensity: number;
-  isMultiplayer: boolean;
-  otherPlayers: RemotePlayer[];
-}
-
 export interface PlayerState {
+  id: string;
   position: Point3D;
   velocity: Point3D;
   isJumping: boolean;
@@ -80,6 +64,28 @@ export interface PlayerState {
   phaseActive: boolean;
   phaseTimeRemaining: number;
   phaseCooldown: number;
+  // Stats
+  lives: number;
+  score: number;
+  colors: { shirt: string; pants: string };
+}
+
+export interface GameState {
+  isPlaying: boolean;
+  score: number; // Combined or P1 score for backward compatibility
+  distance: number;
+  speed: number;
+  // lives: number; // Deprecated, use player.lives
+  gameOver: boolean;
+  gameWon: boolean;
+  level: number;
+  particles: Particle[];
+  goldCollected: number;
+  levelTarget: number;
+  shakeIntensity: number;
+  isMultiplayer: boolean;
+  player: PlayerState;
+  player2?: PlayerState;
 }
 
 export interface HighScore {
